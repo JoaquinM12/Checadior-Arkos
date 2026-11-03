@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QFrame,
     QGridLayout,
-    QStackedWidget
+    QStackedWidget,
+    QMessageBox
 )
 
 from PySide6.QtCore import Qt, Signal
@@ -15,6 +16,7 @@ from PySide6.QtCore import Qt, Signal
 from Vistas.VisChecador import VisChecador
 from Vistas.VisMaestros import VisMaestros
 from Vistas.VisNuevoMaestro import VisNuevoMaestro
+from Vistas.VisEditarMaestro import VisEditarMaestro
 
 
 class VisInicio(QWidget):
@@ -31,9 +33,16 @@ class VisInicio(QWidget):
         """)
 
         self.indices = {}
+        self.paginas_provisionales = {}
+
         self.pagina_registro_rostro = None
+        self.pagina_editar_maestro = None
 
         self.crear_interfaz()
+
+    # =====================================
+    # INTERFAZ PRINCIPAL
+    # =====================================
 
     def crear_interfaz(self):
 
@@ -60,6 +69,7 @@ class VisInicio(QWidget):
 
         logo = QLabel("ARKOS")
         logo.setAlignment(Qt.AlignCenter)
+
         logo.setStyleSheet("""
             color: white;
             font-size: 29px;
@@ -70,6 +80,7 @@ class VisInicio(QWidget):
 
         subtitulo = QLabel("CHECADOR DOCENTE")
         subtitulo.setAlignment(Qt.AlignCenter)
+
         subtitulo.setStyleSheet("""
             color: #FF851B;
             font-size: 11px;
@@ -92,28 +103,28 @@ class VisInicio(QWidget):
             }
         """)
 
-        # Inicio
+        # INICIO
         self.pagina_inicio = self.crear_pagina_inicio()
 
         self.indices["Inicio"] = self.paginas.addWidget(
             self.pagina_inicio
         )
 
-        # Checador
+        # CHECADOR FACIAL
         self.pagina_checador = VisChecador()
 
         self.indices["Checador facial"] = self.paginas.addWidget(
             self.pagina_checador
         )
 
-        # Maestros
+        # MAESTROS
         self.pagina_maestros = VisMaestros()
 
         self.indices["Maestros"] = self.paginas.addWidget(
             self.pagina_maestros
         )
 
-        # Nuevo maestro
+        # NUEVO MAESTRO
         self.pagina_nuevo_maestro = VisNuevoMaestro()
 
         self.indices["Nuevo maestro"] = self.paginas.addWidget(
@@ -126,6 +137,10 @@ class VisInicio(QWidget):
 
         self.pagina_maestros.nuevo_maestro_solicitado.connect(
             self.mostrar_nuevo_maestro
+        )
+
+        self.pagina_maestros.editar_maestro_solicitado.connect(
+            self.mostrar_editar_maestro
         )
 
         self.pagina_maestros.registro_rostro_solicitado.connect(
@@ -344,6 +359,10 @@ class VisInicio(QWidget):
             self.indices["Maestros"]
         )
 
+    # =====================================
+    # NUEVO MAESTRO
+    # =====================================
+
     def mostrar_nuevo_maestro(self):
 
         self.paginas.setCurrentIndex(
@@ -359,13 +378,70 @@ class VisInicio(QWidget):
         )
 
     # =====================================
+    # EDITAR MAESTRO
+    # =====================================
+
+    def mostrar_editar_maestro(self, maestro):
+
+        # Eliminar formulario anterior si existe
+        if self.pagina_editar_maestro is not None:
+
+            self.paginas.removeWidget(
+                self.pagina_editar_maestro
+            )
+
+            self.pagina_editar_maestro.deleteLater()
+
+            self.pagina_editar_maestro = None
+
+        # Crear formulario con los datos seleccionados
+        self.pagina_editar_maestro = VisEditarMaestro(
+            maestro
+        )
+
+        self.pagina_editar_maestro.cancelar_solicitado.connect(
+            self.mostrar_maestros
+        )
+
+        self.pagina_editar_maestro.maestro_actualizado.connect(
+            self.maestro_actualizado
+        )
+
+        indice = self.paginas.addWidget(
+            self.pagina_editar_maestro
+        )
+
+        self.paginas.setCurrentIndex(indice)
+
+    def maestro_actualizado(self, maestro):
+
+        self.pagina_maestros.actualizar_lista()
+
+        self.paginas.setCurrentIndex(
+            self.indices["Maestros"]
+        )
+
+    # =====================================
     # REGISTRO FACIAL
     # =====================================
 
     def mostrar_registro_rostro(self, maestro):
 
-        # La pantalla se cargará cuando creemos VisRostros.py.
-        from Vistas.VisRostros import VisRostros
+        try:
+
+            from Vistas.VisRostros import VisRostros
+
+        except ImportError as error:
+
+            QMessageBox.information(
+                self,
+                "Módulo pendiente",
+                "El módulo de registro facial todavía no está "
+                "disponible.\n\n"
+                f"Detalle: {error}"
+            )
+
+            return
 
         if self.pagina_registro_rostro is not None:
 
@@ -374,6 +450,8 @@ class VisInicio(QWidget):
             )
 
             self.pagina_registro_rostro.deleteLater()
+
+            self.pagina_registro_rostro = None
 
         self.pagina_registro_rostro = VisRostros(maestro)
 
@@ -393,7 +471,16 @@ class VisInicio(QWidget):
 
     def mostrar_pagina_provisional(self, nombre):
 
+        if nombre in self.paginas_provisionales:
+
+            self.paginas.setCurrentIndex(
+                self.indices[nombre]
+            )
+
+            return
+
         pagina = QWidget()
+
         layout = QVBoxLayout(pagina)
 
         titulo = QLabel(nombre)
@@ -420,5 +507,6 @@ class VisInicio(QWidget):
         indice = self.paginas.addWidget(pagina)
 
         self.indices[nombre] = indice
+        self.paginas_provisionales[nombre] = pagina
 
         self.paginas.setCurrentIndex(indice)

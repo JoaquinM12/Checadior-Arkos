@@ -20,32 +20,36 @@ class VisMaestros(QWidget):
 
     nuevo_maestro_solicitado = Signal()
     registro_rostro_solicitado = Signal(dict)
+    editar_maestro_solicitado = Signal(dict)
 
     def __init__(self):
         super().__init__()
 
+        self.maestros = []
+
         self.crear_interfaz()
         self.actualizar_lista()
 
+    # =====================================
+    # INTERFAZ
+    # =====================================
+
     def crear_interfaz(self):
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(35, 30, 35, 30)
-        layout.setSpacing(18)
-
-        # =====================================
-        # TÍTULO
-        # =====================================
+        layout_principal = QVBoxLayout(self)
+        layout_principal.setContentsMargins(30, 25, 30, 25)
+        layout_principal.setSpacing(18)
 
         titulo = QLabel("ADMINISTRACIÓN DE MAESTROS")
+
         titulo.setStyleSheet("""
-            font-size: 26px;
+            font-size: 25px;
             font-weight: bold;
             color: #001F3F;
         """)
 
         descripcion = QLabel(
-            "Consulta y administra los maestros registrados en ARKOS."
+            "Consulta, registra y administra los maestros del sistema."
         )
 
         descripcion.setStyleSheet("""
@@ -53,21 +57,28 @@ class VisMaestros(QWidget):
             color: #64748B;
         """)
 
+        layout_principal.addWidget(titulo)
+        layout_principal.addWidget(descripcion)
+
         # =====================================
         # BOTONES
         # =====================================
 
         botones = QHBoxLayout()
+        botones.setSpacing(10)
 
         self.btn_nuevo = QPushButton("+ NUEVO MAESTRO")
         self.btn_actualizar = QPushButton("ACTUALIZAR")
-        self.btn_registrar_rostro = QPushButton("REGISTRAR ROSTRO")
+        self.btn_editar = QPushButton("EDITAR MAESTRO")
+        self.btn_rostro = QPushButton("REGISTRAR ROSTRO")
 
         for boton in (
             self.btn_nuevo,
             self.btn_actualizar,
-            self.btn_registrar_rostro
+            self.btn_editar,
+            self.btn_rostro
         ):
+
             boton.setMinimumHeight(42)
             boton.setCursor(Qt.PointingHandCursor)
 
@@ -76,10 +87,11 @@ class VisMaestros(QWidget):
                 background-color: #003B73;
                 color: white;
                 border: none;
-                border-radius: 7px;
-                padding: 10px 18px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 font-weight: bold;
             }
+
             QPushButton:hover {
                 background-color: #1677C8;
             }
@@ -87,54 +99,65 @@ class VisMaestros(QWidget):
 
         self.btn_actualizar.setStyleSheet("""
             QPushButton {
-                background-color: #E2E8F0;
-                color: #001F3F;
+                background-color: #64748B;
+                color: white;
                 border: none;
-                border-radius: 7px;
-                padding: 10px 18px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 font-weight: bold;
             }
+
             QPushButton:hover {
-                background-color: #CBD5E1;
+                background-color: #475569;
             }
         """)
 
-        self.btn_registrar_rostro.setStyleSheet("""
+        self.btn_editar.setStyleSheet("""
             QPushButton {
-                background-color: #1677C8;
+                background-color: #D97706;
                 color: white;
                 border: none;
-                border-radius: 7px;
-                padding: 10px 18px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 font-weight: bold;
             }
+
             QPushButton:hover {
-                background-color: #003B73;
+                background-color: #B45309;
             }
+
             QPushButton:disabled {
                 background-color: #CBD5E1;
                 color: #64748B;
             }
         """)
 
-        self.btn_nuevo.clicked.connect(
-            self.nuevo_maestro_solicitado.emit
-        )
+        self.btn_rostro.setStyleSheet("""
+            QPushButton {
+                background-color: #15803D;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
 
-        self.btn_actualizar.clicked.connect(
-            self.actualizar_lista
-        )
+            QPushButton:hover {
+                background-color: #166534;
+            }
 
-        self.btn_registrar_rostro.clicked.connect(
-            self.abrir_registro_rostro
-        )
-
-        self.btn_registrar_rostro.setEnabled(False)
+            QPushButton:disabled {
+                background-color: #CBD5E1;
+                color: #64748B;
+            }
+        """)
 
         botones.addWidget(self.btn_nuevo)
         botones.addWidget(self.btn_actualizar)
-        botones.addWidget(self.btn_registrar_rostro)
-        botones.addStretch()
+        botones.addWidget(self.btn_editar)
+        botones.addWidget(self.btn_rostro)
+
+        layout_principal.addLayout(botones)
 
         # =====================================
         # TABLA
@@ -152,12 +175,6 @@ class VisMaestros(QWidget):
             "Fecha de registro"
         ])
 
-        self.tabla.setRowCount(0)
-
-        self.tabla.setEditTriggers(
-            QTableWidget.NoEditTriggers
-        )
-
         self.tabla.setSelectionBehavior(
             QTableWidget.SelectRows
         )
@@ -166,67 +183,82 @@ class VisMaestros(QWidget):
             QTableWidget.SingleSelection
         )
 
+        self.tabla.setEditTriggers(
+            QTableWidget.NoEditTriggers
+        )
+
         self.tabla.verticalHeader().setVisible(False)
 
         self.tabla.horizontalHeader().setSectionResizeMode(
             QHeaderView.Stretch
         )
 
-        self.tabla.setMinimumHeight(300)
-
         self.tabla.setStyleSheet("""
             QTableWidget {
                 background-color: white;
-                color: #1E293B;
                 border: 1px solid #E2E8F0;
-                border-radius: 8px;
+                border-radius: 7px;
                 gridline-color: #E2E8F0;
                 font-size: 13px;
+                color: #1E293B;
             }
 
             QHeaderView::section {
                 background-color: #003B73;
                 color: white;
                 padding: 10px;
-                border: none;
                 font-weight: bold;
-            }
-
-            QTableWidget::item {
-                padding: 8px;
+                border: none;
             }
 
             QTableWidget::item:selected {
-                background-color: #DCEBFA;
+                background-color: #DBEAFE;
                 color: #001F3F;
             }
         """)
 
-        self.tabla.itemSelectionChanged.connect(
-            self.actualizar_estado_boton
-        )
+        layout_principal.addWidget(self.tabla)
 
         # =====================================
-        # TOTAL
+        # TOTAL DE MAESTROS
         # =====================================
 
         self.lbl_total = QLabel("Total de maestros: 0")
 
         self.lbl_total.setStyleSheet("""
-            color: #003B73;
-            font-size: 14px;
+            color: #64748B;
+            font-size: 13px;
             font-weight: bold;
         """)
 
+        layout_principal.addWidget(self.lbl_total)
+
         # =====================================
-        # AGREGAR ELEMENTOS
+        # CONEXIONES
         # =====================================
 
-        layout.addWidget(titulo)
-        layout.addWidget(descripcion)
-        layout.addLayout(botones)
-        layout.addWidget(self.tabla, 1)
-        layout.addWidget(self.lbl_total)
+        self.btn_nuevo.clicked.connect(
+            self.nuevo_maestro_solicitado.emit
+        )
+
+        self.btn_actualizar.clicked.connect(
+            self.actualizar_lista
+        )
+
+        self.btn_editar.clicked.connect(
+            self.abrir_edicion_maestro
+        )
+
+        self.btn_rostro.clicked.connect(
+            self.abrir_registro_rostro
+        )
+
+        self.tabla.itemSelectionChanged.connect(
+            self.actualizar_botones
+        )
+
+        self.btn_editar.setEnabled(False)
+        self.btn_rostro.setEnabled(False)
 
     # =====================================
     # ACTUALIZAR LISTA
@@ -236,29 +268,39 @@ class VisMaestros(QWidget):
 
         try:
 
-            maestros = cargar_maestros()
+            self.maestros = cargar_maestros()
+
+            # Evitar señales mientras se llena la tabla
+            self.tabla.blockSignals(True)
 
             self.tabla.clearContents()
-            self.tabla.setRowCount(0)
+            self.tabla.setRowCount(len(self.maestros))
 
-            for maestro in maestros:
+            for fila, maestro in enumerate(self.maestros):
 
-                fila = self.tabla.rowCount()
-                self.tabla.insertRow(fila)
+                id_maestro = maestro.get("id", "")
+                nombre = maestro.get("nombre", "")
+                apellidos = maestro.get("apellidos", "")
+                activo = maestro.get("activo", True)
+                fecha = maestro.get("fecha_registro", "")
+
+                estado = "Activo" if activo else "Inactivo"
 
                 valores = [
-                    maestro.get("id", ""),
-                    maestro.get("nombre", ""),
-                    maestro.get("apellidos", ""),
-                    "Activo" if maestro.get("activo", True) else "Inactivo",
-                    maestro.get("fecha_registro", "")
+                    id_maestro,
+                    nombre,
+                    apellidos,
+                    estado,
+                    fecha
                 ]
 
                 for columna, valor in enumerate(valores):
 
                     elemento = QTableWidgetItem(str(valor))
 
-                    elemento.setTextAlignment(Qt.AlignCenter)
+                    elemento.setTextAlignment(
+                        Qt.AlignCenter
+                    )
 
                     self.tabla.setItem(
                         fila,
@@ -266,15 +308,23 @@ class VisMaestros(QWidget):
                         elemento
                     )
 
+            # Restaurar señales
+            self.tabla.blockSignals(False)
+
+            # Actualizar total
             self.lbl_total.setText(
-                f"Total de maestros: {self.tabla.rowCount()}"
+                f"Total de maestros: {len(self.maestros)}"
             )
 
-            self.tabla.resizeRowsToContents()
+            # Limpiar selección anterior
+            self.tabla.clearSelection()
+            self.tabla.setCurrentCell(-1, -1)
 
-            self.btn_registrar_rostro.setEnabled(False)
+            self.actualizar_botones()
 
         except Exception as error:
+
+            self.tabla.blockSignals(False)
 
             QMessageBox.critical(
                 self,
@@ -283,22 +333,67 @@ class VisMaestros(QWidget):
             )
 
     # =====================================
-    # VALIDAR SELECCIÓN
+    # OBTENER MAESTRO SELECCIONADO
     # =====================================
 
-    def actualizar_estado_boton(self):
+    def obtener_maestro_seleccionado(self):
 
         fila = self.tabla.currentRow()
 
         if fila < 0:
-            self.btn_registrar_rostro.setEnabled(False)
+            return None
+
+        elemento = self.tabla.item(fila, 0)
+
+        if elemento is None:
+            return None
+
+        id_maestro = elemento.text()
+
+        for maestro in self.maestros:
+
+            if maestro.get("id") == id_maestro:
+                return maestro
+
+        return None
+
+    # =====================================
+    # ACTUALIZAR BOTONES
+    # =====================================
+
+    def actualizar_botones(self):
+
+        maestro = self.obtener_maestro_seleccionado()
+
+        seleccionado = maestro is not None
+
+        self.btn_editar.setEnabled(seleccionado)
+
+        self.btn_rostro.setEnabled(
+            seleccionado and maestro.get("activo", True)
+        )
+
+    # =====================================
+    # ABRIR EDICIÓN
+    # =====================================
+
+    def abrir_edicion_maestro(self):
+
+        maestro = self.obtener_maestro_seleccionado()
+
+        if maestro is None:
+
+            QMessageBox.warning(
+                self,
+                "Selecciona un maestro",
+                "Primero debes seleccionar un maestro de la tabla."
+            )
+
             return
 
-        estado = self.tabla.item(fila, 3)
-
-        activo = estado is not None and estado.text() == "Activo"
-
-        self.btn_registrar_rostro.setEnabled(activo)
+        self.editar_maestro_solicitado.emit(
+            maestro.copy()
+        )
 
     # =====================================
     # ABRIR REGISTRO FACIAL
@@ -306,20 +401,30 @@ class VisMaestros(QWidget):
 
     def abrir_registro_rostro(self):
 
-        fila = self.tabla.currentRow()
+        maestro = self.obtener_maestro_seleccionado()
 
-        if fila < 0:
+        if maestro is None:
+
             QMessageBox.warning(
                 self,
                 "Selecciona un maestro",
-                "Primero debes seleccionar un maestro de la tabla."
+                "Primero debes seleccionar un maestro."
             )
+
             return
 
-        maestro = {
-            "id": self.tabla.item(fila, 0).text(),
-            "nombre": self.tabla.item(fila, 1).text(),
-            "apellidos": self.tabla.item(fila, 2).text()
-        }
+        if not maestro.get("activo", True):
 
-        self.registro_rostro_solicitado.emit(maestro)
+            QMessageBox.warning(
+                self,
+                "Maestro inactivo",
+                "No puedes registrar rostros de un maestro inactivo."
+            )
+
+            return
+
+        self.registro_rostro_solicitado.emit({
+            "id": maestro.get("id"),
+            "nombre": maestro.get("nombre"),
+            "apellidos": maestro.get("apellidos")
+        })

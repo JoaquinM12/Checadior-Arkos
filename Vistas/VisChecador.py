@@ -1,5 +1,8 @@
 
 import cv2
+import numpy as np
+
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -13,55 +16,113 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 
 from Controladores.ControlReconocimiento import reconocer_imagen
+from Servicios.ServicioAntiSpoofing import evaluar_rostro
 
 
 class VisChecador(QWidget):
 
-    INTERVALO_RECONOCIMIENTO = 30
+    # ================================================
+    # CONFIGURACION DE SEGURIDAD
+    # ================================================
+
+    INTERVALO_RECONOCIMIENTO = 15
+
+    CONFIANZA_DETECCION = 0.88
+
+    TAMANO_MINIMO_ROSTRO = 110
+
+    BRILLO_MINIMO = 55
+    BRILLO_MAXIMO = 200
+
+    NITIDEZ_MINIMA = 45
+
+    CONFIRMACIONES_NECESARIAS = 3
+
+    CONFIRMACIONES_ANTI_SPOOF = 3
+
+    DETECCIONES_NECESARIAS = 4
+
+    # Similitud mínima entre cajas consecutivas.
+    UMBRAL_ESTABILIDAD = 0.35
 
     def __init__(self):
+
         super().__init__()
 
         self.camara = None
+
         self.contador_frames = 0
 
-        self.resultado_reconocimiento = {
-            "reconocido": False,
-            "mensaje": "Esperando cámara..."
-        }
+        # ============================================
+        # ESTABILIDAD DE DETECCION
+        # ============================================
 
-        # Detector auxiliar para comprobar cuántos rostros hay.
-        ruta_detector = (
-            cv2.data.haarcascades +
-            "haarcascade_frontalface_default.xml"
+        self.contador_detecciones = 0
+        self.ultima_caja_detectada = None
+        self.deteccion_confirmada = False
+
+        # ============================================
+        # CONFIRMACION DE IDENTIDAD
+        # ============================================
+
+        self.ultimo_id_candidato = None
+        self.confirmaciones = 0
+
+        self.maestro_confirmado = None
+        self.resultado_reconocimiento = None
+
+        # ============================================
+        # CONFIRMACION ANTI-SPOOFING
+        # ============================================
+
+        self.contador_rostro_real = 0
+        self.ultimo_resultado_anti_spoof = None
+
+        # ============================================
+        # CARGAR MODELO YUNET
+        # ============================================
+
+        ruta_proyecto = Path(__file__).resolve().parent.parent
+
+        ruta_yunet = (
+            ruta_proyecto
+            / "Recursos"
+            / "ModelosIA"
+            / "yunet.onnx"
         )
 
-        self.detector_rostros = cv2.CascadeClassifier(
-            ruta_detector
-        )
+        if not ruta_yunet.exists():
 
-        if self.detector_rostros.empty():
-            raise RuntimeError(
-                "No se pudo cargar el detector de rostros de OpenCV."
+            raise FileNotFoundError(
+                f"No se encontro el modelo YuNet: {ruta_yunet}"
             )
 
-        # Temporizador de cámara.
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.actualizar_frame)
+        self.detector_yunet = cv2.FaceDetectorYN.create(
+            str(ruta_yunet),
+            "",
+            (640, 480),
+            self.CONFIANZA_DETECCION,
+            0.30,
+            5000
+        )
 
         self.crear_interfaz()
 
-    # =================================================
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.actualizar_frame)
+
+    # ================================================
     # INTERFAZ
-    # =================================================
+    # ================================================
 
     def crear_interfaz(self):
 
         layout = QVBoxLayout(self)
+
         layout.setContentsMargins(30, 20, 30, 20)
         layout.setSpacing(15)
 
-        titulo = QLabel("CHECADOR FACIAL")
+        titulo = QLabel("CHECADOR FACIAL ARKOS")
 
         titulo.setAlignment(Qt.AlignCenter)
 
@@ -72,7 +133,7 @@ class VisChecador(QWidget):
         """)
 
         self.lbl_camara = QLabel(
-            "La cámara está detenida"
+            "La camara esta detenida"
         )
 
         self.lbl_camara.setAlignment(Qt.AlignCenter)
@@ -86,7 +147,7 @@ class VisChecador(QWidget):
         """)
 
         self.lbl_estado = QLabel(
-            "Esperando inicio de cámara..."
+            "Esperando inicio de camara..."
         )
 
         self.lbl_estado.setAlignment(Qt.AlignCenter)
@@ -99,7 +160,7 @@ class VisChecador(QWidget):
         """)
 
         self.lbl_maestro = QLabel(
-            "Ningún maestro identificado"
+            "Ningun maestro identificado"
         )
 
         self.lbl_maestro.setAlignment(Qt.AlignCenter)
@@ -111,13 +172,11 @@ class VisChecador(QWidget):
             padding: 10px;
         """)
 
-        # Botón iniciar.
         self.btn_iniciar = QPushButton(
-            "INICIAR CÁMARA"
+            "INICIAR CAMARA"
         )
 
         self.btn_iniciar.setMinimumHeight(45)
-        self.btn_iniciar.setCursor(Qt.PointingHandCursor)
 
         self.btn_iniciar.setStyleSheet("""
             QPushButton {
@@ -138,13 +197,11 @@ class VisChecador(QWidget):
             self.iniciar_camara
         )
 
-        # Botón detener.
         self.btn_detener = QPushButton(
-            "DETENER CÁMARA"
+            "DETENER CAMARA"
         )
 
         self.btn_detener.setMinimumHeight(45)
-        self.btn_detener.setCursor(Qt.PointingHandCursor)
 
         self.btn_detener.setStyleSheet("""
             QPushButton {
@@ -166,6 +223,7 @@ class VisChecador(QWidget):
         )
 
         botones = QHBoxLayout()
+
         botones.setSpacing(15)
 
         botones.addWidget(self.btn_iniciar)
@@ -177,9 +235,144 @@ class VisChecador(QWidget):
         layout.addWidget(self.lbl_maestro)
         layout.addLayout(botones)
 
-    # =================================================
-    # INICIAR CÁMARA
-    # =================================================
+    # ================================================
+    # REINICIAR ESTABILIDAD DE DETECCION
+    # ================================================
+
+    def reiniciar_deteccion(self):
+
+        self.contador_detecciones = 0
+
+        self.ultima_caja_detectada = None
+
+        self.deteccion_confirmada = False
+
+    # ================================================
+    # REINICIAR IDENTIFICACION
+    # ================================================
+
+    def reiniciar_identificacion(self):
+
+        self.ultimo_id_candidato = None
+
+        self.confirmaciones = 0
+
+        self.maestro_confirmado = None
+
+        self.resultado_reconocimiento = None
+
+        self.contador_rostro_real = 0
+
+        self.ultimo_resultado_anti_spoof = None
+
+    # ================================================
+    # REINICIAR TODO EL PROCESO
+    # ================================================
+
+    def reiniciar_proceso(self):
+
+        self.reiniciar_deteccion()
+
+        self.reiniciar_identificacion()
+
+        self.contador_frames = 0
+
+    # ================================================
+    # COMPARAR POSICION DE DOS DETECCIONES
+    # ================================================
+
+    def calcular_iou(self, caja1, caja2):
+
+        x1, y1, w1, h1 = caja1
+        x2, y2, w2, h2 = caja2
+
+        izquierda = max(x1, x2)
+        arriba = max(y1, y2)
+
+        derecha = min(x1 + w1, x2 + w2)
+        abajo = min(y1 + h1, y2 + h2)
+
+        ancho_interseccion = max(
+            0,
+            derecha - izquierda
+        )
+
+        alto_interseccion = max(
+            0,
+            abajo - arriba
+        )
+
+        area_interseccion = (
+            ancho_interseccion * alto_interseccion
+        )
+
+        area1 = w1 * h1
+        area2 = w2 * h2
+
+        area_union = (
+            area1 + area2 - area_interseccion
+        )
+
+        if area_union <= 0:
+            return 0
+
+        return area_interseccion / area_union
+
+    # ================================================
+    # CONFIRMAR ESTABILIDAD DEL ROSTRO
+    # ================================================
+
+    def confirmar_deteccion(self, x, y, ancho, alto):
+
+        caja_actual = (
+            x,
+            y,
+            ancho,
+            alto
+        )
+
+        if self.ultima_caja_detectada is None:
+
+            self.contador_detecciones = 1
+
+            self.ultima_caja_detectada = caja_actual
+
+            self.deteccion_confirmada = False
+
+            return False
+
+        similitud = self.calcular_iou(
+            self.ultima_caja_detectada,
+            caja_actual
+        )
+
+        if similitud >= self.UMBRAL_ESTABILIDAD:
+
+            self.contador_detecciones += 1
+
+        else:
+
+            # La deteccion cambio demasiado.
+            # Se comienza nuevamente.
+
+            self.contador_detecciones = 1
+
+            self.deteccion_confirmada = False
+
+        self.ultima_caja_detectada = caja_actual
+
+        if (
+            self.contador_detecciones
+            >= self.DETECCIONES_NECESARIAS
+        ):
+
+            self.deteccion_confirmada = True
+
+        return self.deteccion_confirmada
+
+    # ================================================
+    # INICIAR CAMARA
+    # ================================================
 
     def iniciar_camara(self):
 
@@ -194,40 +387,261 @@ class VisChecador(QWidget):
         if not self.camara.isOpened():
 
             self.lbl_camara.setText(
-                "No se pudo acceder a la cámara"
+                "No se pudo acceder a la camara"
             )
 
             self.lbl_estado.setText(
-                "Error al iniciar la cámara"
+                "Error al iniciar la camara"
             )
 
             self.camara.release()
+
             self.camara = None
 
             return
 
-        self.contador_frames = (
-            self.INTERVALO_RECONOCIMIENTO - 1
-        )
-
-        self.resultado_reconocimiento = {
-            "reconocido": False,
-            "mensaje": "Buscando rostro..."
-        }
+        self.reiniciar_proceso()
 
         self.lbl_estado.setText(
-            "Buscando rostros..."
+            "Buscando rostro..."
         )
 
         self.lbl_maestro.setText(
-            "Esperando identificación..."
+            "Esperando identificacion..."
         )
 
         self.timer.start(30)
 
-    # =================================================
-    # ACTUALIZAR CÁMARA
-    # =================================================
+    # ================================================
+    # FILTRO DE CALIDAD FACIAL
+    # ================================================
+
+    def validar_calidad_rostro(
+        self,
+        frame,
+        x,
+        y,
+        ancho,
+        alto
+    ):
+
+        alto_frame, ancho_frame = frame.shape[:2]
+
+        if (
+            ancho < self.TAMANO_MINIMO_ROSTRO
+            or alto < self.TAMANO_MINIMO_ROSTRO
+        ):
+
+            return False, "Acercate mas a la camara."
+
+        x1 = max(0, x)
+        y1 = max(0, y)
+
+        x2 = min(ancho_frame, x + ancho)
+        y2 = min(alto_frame, y + alto)
+
+        if x2 <= x1 or y2 <= y1:
+
+            return False, "Rostro fuera de los limites."
+
+        rostro = frame[y1:y2, x1:x2]
+
+        if rostro.size == 0:
+
+            return False, "No se pudo analizar el rostro."
+
+        gris = cv2.cvtColor(
+            rostro,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        brillo = np.mean(gris)
+
+        if brillo < self.BRILLO_MINIMO:
+
+            return False, "Hay poca iluminacion."
+
+        if brillo > self.BRILLO_MAXIMO:
+
+            return False, "Hay demasiada iluminacion."
+
+        nitidez = cv2.Laplacian(
+            gris,
+            cv2.CV_64F
+        ).var()
+
+        if nitidez < self.NITIDEZ_MINIMA:
+
+            return False, "Rostro borroso. Mantente quieto."
+
+        return True, "Calidad facial correcta."
+
+    # ================================================
+    # PROCESAR ANTI-SPOOFING
+    # ================================================
+
+    def procesar_anti_spoofing(
+        self,
+        frame,
+        x,
+        y,
+        ancho,
+        alto
+    ):
+
+        caja = (
+            x,
+            y,
+            x + ancho,
+            y + alto
+        )
+
+        resultado = evaluar_rostro(
+            frame,
+            caja
+        )
+
+        self.ultimo_resultado_anti_spoof = resultado
+
+        if not resultado.get("correcto"):
+
+            self.reiniciar_identificacion()
+
+            self.lbl_estado.setText(
+                "ERROR EN ANTI-SPOOFING"
+            )
+
+            self.lbl_maestro.setText(
+                resultado.get(
+                    "mensaje",
+                    "No se pudo analizar el rostro."
+                )
+            )
+
+            return False
+
+        if not resultado.get("es_real"):
+
+            self.reiniciar_identificacion()
+
+            self.lbl_estado.setText(
+                "VERIFICACION DE SEGURIDAD RECHAZADA"
+            )
+
+            self.lbl_maestro.setText(
+                resultado.get(
+                    "mensaje",
+                    "No se pudo validar el rostro."
+                )
+            )
+
+            return False
+
+        self.contador_rostro_real += 1
+
+        if (
+            self.contador_rostro_real
+            < self.CONFIRMACIONES_ANTI_SPOOF
+        ):
+
+            self.lbl_estado.setText(
+                "Verificando autenticidad del rostro..."
+            )
+
+            self.lbl_maestro.setText(
+                f"Comprobacion de seguridad "
+                f"{self.contador_rostro_real}/"
+                f"{self.CONFIRMACIONES_ANTI_SPOOF}"
+            )
+
+            return False
+
+        self.lbl_estado.setText(
+            "SEGURIDAD FACIAL VALIDADA"
+        )
+
+        return True
+
+    # ================================================
+    # PROCESAR RECONOCIMIENTO
+    # ================================================
+
+    def procesar_reconocimiento(self, frame_original):
+
+        resultado = reconocer_imagen(
+            frame_original
+        )
+
+        if not resultado.get("reconocido"):
+
+            self.reiniciar_identificacion()
+
+            self.lbl_estado.setText(
+                "IDENTIDAD NO CONFIRMADA"
+            )
+
+            self.lbl_maestro.setText(
+                resultado.get(
+                    "mensaje",
+                    "Rostro no reconocido."
+                )
+            )
+
+            return
+
+        maestro_id = resultado.get(
+            "maestro_id"
+        )
+
+        if not maestro_id:
+
+            self.reiniciar_identificacion()
+
+            return
+
+        if maestro_id == self.ultimo_id_candidato:
+
+            self.confirmaciones += 1
+
+        else:
+
+            self.ultimo_id_candidato = maestro_id
+
+            self.confirmaciones = 1
+
+            self.maestro_confirmado = None
+
+        if (
+            self.confirmaciones
+            >= self.CONFIRMACIONES_NECESARIAS
+        ):
+
+            self.maestro_confirmado = resultado
+
+            self.resultado_reconocimiento = resultado
+
+            self.lbl_estado.setText(
+                "MAESTRO IDENTIFICADO Y CONFIRMADO"
+            )
+
+            self.lbl_maestro.setText(
+                f"{resultado['nombre']} | {maestro_id}"
+            )
+
+        else:
+
+            self.lbl_estado.setText(
+                "Verificando identidad..."
+            )
+
+            self.lbl_maestro.setText(
+                f"Coincidencia {self.confirmaciones}/"
+                f"{self.CONFIRMACIONES_NECESARIAS}"
+            )
+
+    # ================================================
+    # ACTUALIZAR CAMARA
+    # ================================================
 
     def actualizar_frame(self):
 
@@ -239,170 +653,263 @@ class VisChecador(QWidget):
         if not correcto:
             return
 
-        # Conservar imagen original para AuraFace.
-        # La imagen mostrada se voltea como espejo.
         frame = cv2.flip(
             frame_original,
             1
         )
 
-        gris = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2GRAY
+        alto, ancho = frame.shape[:2]
+
+        self.detector_yunet.setInputSize(
+            (ancho, alto)
         )
 
-        # Detectar rostros.
-        rostros = self.detector_rostros.detectMultiScale(
-            gris,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(80, 80)
+        _, rostros = self.detector_yunet.detect(
+            frame
         )
+
+        if rostros is None:
+            rostros = []
 
         cantidad = len(rostros)
 
-        # =============================================
-        # SIN ROSTROS
-        # =============================================
+        # ============================================
+        # NINGUN ROSTRO
+        # ============================================
 
         if cantidad == 0:
 
-            self.resultado_reconocimiento = {
-                "reconocido": False,
-                "mensaje": "No se detectaron rostros."
-            }
+            self.reiniciar_proceso()
 
             self.lbl_estado.setText(
                 "No se detectaron rostros."
             )
 
             self.lbl_maestro.setText(
-                "Acércate a la cámara."
+                "Colocate frente a la camara."
             )
 
-        # =============================================
+        # ============================================
         # VARIOS ROSTROS
-        # =============================================
+        # ============================================
 
         elif cantidad > 1:
 
-            self.resultado_reconocimiento = {
-                "reconocido": False,
-                "mensaje": "Hay varias personas frente a la cámara."
-            }
+            self.reiniciar_proceso()
 
             self.lbl_estado.setText(
-                f"Se detectaron {cantidad} rostros."
+                "VARIAS PERSONAS DETECTADAS"
             )
 
             self.lbl_maestro.setText(
                 "Debe permanecer una sola persona."
             )
 
-        # =============================================
+            for rostro in rostros:
+
+                x, y, w, h = map(
+                    int,
+                    rostro[:4]
+                )
+
+                cv2.rectangle(
+                    frame,
+                    (x, y),
+                    (x + w, y + h),
+                    (0, 0, 255),
+                    2
+                )
+
+                cv2.putText(
+                    frame,
+                    "DETECCION RECHAZADA",
+                    (x, max(y - 10, 25)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 255),
+                    2
+                )
+
+        # ============================================
         # UN SOLO ROSTRO
-        # =============================================
+        # ============================================
 
         else:
 
-            self.lbl_estado.setText(
-                "Rostro detectado. Verificando identidad..."
+            rostro = rostros[0]
+
+            x, y, w, h = map(
+                int,
+                rostro[:4]
             )
 
-            self.contador_frames += 1
+            confianza_detector = float(
+                rostro[14]
+            )
 
-            # Ejecutar reconocimiento cada cierto número
-            # de cuadros para reducir el consumo de CPU.
+            # ========================================
+            # VALIDAR CONFIANZA
+            # ========================================
+
             if (
-                self.contador_frames
-                % self.INTERVALO_RECONOCIMIENTO == 0
+                confianza_detector
+                < self.CONFIANZA_DETECCION
             ):
 
-                self.resultado_reconocimiento = (
-                    reconocer_imagen(frame_original)
-                )
-
-            # Mostrar identificación.
-            if self.resultado_reconocimiento.get(
-                "reconocido"
-            ):
-
-                nombre = self.resultado_reconocimiento.get(
-                    "nombre",
-                    "Maestro identificado"
-                )
-
-                maestro_id = self.resultado_reconocimiento.get(
-                    "maestro_id",
-                    ""
-                )
+                self.reiniciar_proceso()
 
                 self.lbl_estado.setText(
-                    "MAESTRO IDENTIFICADO"
+                    "DETECCION FACIAL INSUFICIENTE"
                 )
 
                 self.lbl_maestro.setText(
-                    f"{nombre} | {maestro_id}"
+                    "Coloca tu rostro correctamente."
                 )
 
             else:
 
-                mensaje = self.resultado_reconocimiento.get(
-                    "mensaje",
-                    "Rostro no reconocido."
+                # ====================================
+                # VALIDAR CALIDAD
+                # ====================================
+
+                calidad_correcta, mensaje = (
+                    self.validar_calidad_rostro(
+                        frame,
+                        x,
+                        y,
+                        w,
+                        h
+                    )
                 )
 
-                self.lbl_estado.setText(
-                    "IDENTIDAD NO CONFIRMADA"
-                )
+                if not calidad_correcta:
 
-                self.lbl_maestro.setText(
-                    mensaje
-                )
+                    self.reiniciar_proceso()
 
-        # =============================================
-        # DIBUJAR ROSTROS
-        # =============================================
+                    self.lbl_estado.setText(
+                        "FILTRO DE CALIDAD"
+                    )
 
-        for (x, y, ancho, alto) in rostros:
+                    self.lbl_maestro.setText(
+                        mensaje
+                    )
 
-            reconocido = (
-                cantidad == 1
-                and self.resultado_reconocimiento.get(
-                    "reconocido",
-                    False
-                )
-            )
+                else:
 
-            if reconocido:
-                color = (0, 255, 0)
-                texto = "MAESTRO IDENTIFICADO"
+                    # ================================
+                    # CONFIRMAR ESTABILIDAD
+                    # ================================
 
-            else:
-                color = (0, 165, 255)
-                texto = "VERIFICANDO ROSTRO"
+                    deteccion_estable = (
+                        self.confirmar_deteccion(
+                            x,
+                            y,
+                            w,
+                            h
+                        )
+                    )
 
-            cv2.rectangle(
-                frame,
-                (x, y),
-                (x + ancho, y + alto),
-                color,
-                3
-            )
+                    if not deteccion_estable:
 
-            cv2.putText(
-                frame,
-                texto,
-                (x, max(y - 10, 25)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2
-            )
+                        self.reiniciar_identificacion()
 
-        # =============================================
-        # MOSTRAR IMAGEN EN PYSIDE6
-        # =============================================
+                        self.contador_frames = 0
+
+                        self.lbl_estado.setText(
+                            "COMPROBANDO DETECCION FACIAL"
+                        )
+
+                        self.lbl_maestro.setText(
+                            f"Detecciones estables: "
+                            f"{self.contador_detecciones}/"
+                            f"{self.DETECCIONES_NECESARIAS}"
+                        )
+
+                    else:
+
+                        self.contador_frames += 1
+
+                        # ============================
+                        # EJECUTAR ANTI-SPOOFING
+                        # ============================
+
+                        if (
+                            self.contador_frames
+                            % self.INTERVALO_RECONOCIMIENTO == 0
+                        ):
+
+                            seguridad_validada = (
+                                self.procesar_anti_spoofing(
+                                    frame,
+                                    x,
+                                    y,
+                                    w,
+                                    h
+                                )
+                            )
+
+                            # ========================
+                            # EJECUTAR AURAFACE
+                            # ========================
+
+                            if seguridad_validada:
+
+                                self.procesar_reconocimiento(
+                                    frame_original
+                                )
+
+                    # =================================
+                    # DIBUJAR RECUADRO
+                    # =================================
+
+                    if not deteccion_estable:
+
+                        color = (0, 165, 255)
+
+                        texto = "CONFIRMANDO ROSTRO"
+
+                    elif self.maestro_confirmado:
+
+                        color = (0, 255, 0)
+
+                        texto = "IDENTIDAD CONFIRMADA"
+
+                    elif (
+                        self.contador_rostro_real
+                        >= self.CONFIRMACIONES_ANTI_SPOOF
+                    ):
+
+                        color = (0, 255, 255)
+
+                        texto = "ROSTRO VALIDADO"
+
+                    else:
+
+                        color = (0, 165, 255)
+
+                        texto = "VERIFICANDO SEGURIDAD"
+
+                    cv2.rectangle(
+                        frame,
+                        (x, y),
+                        (x + w, y + h),
+                        color,
+                        3
+                    )
+
+                    cv2.putText(
+                        frame,
+                        texto,
+                        (x, max(y - 10, 25)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        color,
+                        2
+                    )
+
+        # ============================================
+        # MOSTRAR IMAGEN
+        # ============================================
 
         frame_rgb = cv2.cvtColor(
             frame,
@@ -431,9 +938,9 @@ class VisChecador(QWidget):
             )
         )
 
-    # =================================================
-    # DETENER CÁMARA
-    # =================================================
+    # ================================================
+    # DETENER CAMARA
+    # ================================================
 
     def detener_camara(self):
 
@@ -442,33 +949,33 @@ class VisChecador(QWidget):
         if self.camara is not None:
 
             self.camara.release()
+
             self.camara = None
 
-        self.resultado_reconocimiento = {
-            "reconocido": False,
-            "mensaje": "Cámara detenida."
-        }
+        self.reiniciar_proceso()
 
-        self.lbl_camara.setPixmap(QPixmap())
+        self.lbl_camara.setPixmap(
+            QPixmap()
+        )
 
         self.lbl_camara.setText(
-            "La cámara está detenida"
+            "La camara esta detenida"
         )
 
         self.lbl_estado.setText(
-            "Esperando inicio de cámara..."
+            "Esperando inicio de camara..."
         )
 
         self.lbl_maestro.setText(
-            "Ningún maestro identificado"
+            "Ningun maestro identificado"
         )
 
-    # =================================================
-    # LIBERAR CÁMARA AL CAMBIAR DE PANTALLA
-    # =================================================
+    # ================================================
+    # CERRAR APLICACION
+    # ================================================
 
-    def hideEvent(self, event):
+    def closeEvent(self, event):
 
         self.detener_camara()
 
-        super().hideEvent(event)
+        event.accept()

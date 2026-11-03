@@ -65,6 +65,7 @@ class VisNuevoMaestro(QWidget):
                     padding: 8px;
                     font-size: 14px;
                 }
+
                 QLineEdit:focus {
                     border: 2px solid #1677C8;
                 }
@@ -76,6 +77,7 @@ class VisNuevoMaestro(QWidget):
         self.lbl_id = QLabel(
             "El ID se asignará automáticamente al guardar."
         )
+
         self.lbl_id.setStyleSheet("""
             color: #003B73;
             font-size: 13px;
@@ -85,6 +87,7 @@ class VisNuevoMaestro(QWidget):
         self.btn_guardar = QPushButton("GUARDAR MAESTRO")
         self.btn_guardar.setMinimumHeight(45)
         self.btn_guardar.setCursor(Qt.PointingHandCursor)
+
         self.btn_guardar.setStyleSheet("""
             QPushButton {
                 background-color: #003B73;
@@ -93,8 +96,13 @@ class VisNuevoMaestro(QWidget):
                 border-radius: 7px;
                 padding: 10px;
             }
+
             QPushButton:hover {
                 background-color: #1677C8;
+            }
+
+            QPushButton:disabled {
+                background-color: #888888;
             }
         """)
 
@@ -132,6 +140,8 @@ class VisNuevoMaestro(QWidget):
             )
             return
 
+        self.btn_guardar.setEnabled(False)
+
         try:
             maestro = registrar_maestro(nombre, apellidos)
 
@@ -143,7 +153,8 @@ class VisNuevoMaestro(QWidget):
                 self,
                 "Registro exitoso",
                 f"El maestro se registró correctamente.\n\n"
-                f"Nombre: {maestro['nombre']} {maestro['apellidos']}\n"
+                f"Nombre: {maestro['nombre']} "
+                f"{maestro['apellidos']}\n"
                 f"ID: {maestro['id']}"
             )
 
@@ -159,3 +170,6 @@ class VisNuevoMaestro(QWidget):
                 "Error",
                 f"No se pudo registrar al maestro:\n{error}"
             )
+
+        finally:
+            self.btn_guardar.setEnabled(True)
