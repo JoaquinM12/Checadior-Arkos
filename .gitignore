@@ -1,21 +1,75 @@
-# Entornos virtuales
-venv/
-.venv/
+# ==========================================================
+# ENTORNOS VIRTUALES
+# ==========================================================
 
-# Python
+venv/
+venv312/
+.venv/
+env/
+
+
+# ==========================================================
+# PYTHON
+# ==========================================================
+
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 
-# Variables privadas
+
+# ==========================================================
+# VARIABLES PRIVADAS
+# ==========================================================
+
 .env
+.env.*
+!.env.example
 
-# Datos locales y biométricos
+
+# ==========================================================
+# DATOS LOCALES Y BIOMÉTRICOS
+# ==========================================================
+
 DatosLocales/Rostros/
 DatosLocales/embeddings_rostros.json
 DatosLocales/debug_antispoof.jpg
 
-# Información personal de maestros
+
+# ==========================================================
+# INFORMACIÓN PERSONAL DE MAESTROS
+# ==========================================================
+
 DatosLocales/maestros.json
 
-# Archivos temporales
+
+# ==========================================================
+# CREDENCIALES PRIVADAS DE FIREBASE
+# ==========================================================
+
+Configuracion/firebase-credentials.json
+
+
+# ==========================================================
+# MODELOS DE INTELIGENCIA ARTIFICIAL
+# ==========================================================
+
+*.onnx
+
+
+# ==========================================================
+# ARCHIVOS TEMPORALES Y REGISTROS
+# ==========================================================
+
 *.log
+*.tmp
+
+
+# ==========================================================
+# EDITORES Y SISTEMA
+# ==========================================================
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

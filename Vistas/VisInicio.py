@@ -17,6 +17,7 @@ from Vistas.VisChecador import VisChecador
 from Vistas.VisMaestros import VisMaestros
 from Vistas.VisNuevoMaestro import VisNuevoMaestro
 from Vistas.VisEditarMaestro import VisEditarMaestro
+from Vistas.VisHorarios import VisHorarios
 
 
 class VisInicio(QWidget):
@@ -132,6 +133,16 @@ class VisInicio(QWidget):
         )
 
         # =====================================
+        # HORARIOS
+        # =====================================
+
+        self.pagina_horarios = VisHorarios()
+
+        self.indices["Horarios"] = self.paginas.addWidget(
+            self.pagina_horarios
+        )
+
+        # =====================================
         # CONEXIONES DE MAESTROS
         # =====================================
 
@@ -238,6 +249,11 @@ class VisInicio(QWidget):
         principal.addWidget(menu)
         principal.addWidget(self.paginas)
 
+        # Mostrar inicio al abrir
+        self.paginas.setCurrentIndex(
+            self.indices["Inicio"]
+        )
+
     # =====================================
     # PANTALLA DE INICIO
     # =====================================
@@ -337,6 +353,17 @@ class VisInicio(QWidget):
             self.mostrar_maestros()
             return
 
+        # HORARIOS
+        if nombre == "Horarios":
+
+            self.pagina_horarios.cargar_horarios()
+
+            self.paginas.setCurrentIndex(
+                self.indices["Horarios"]
+            )
+
+            return
+
         if nombre in self.indices:
 
             self.paginas.setCurrentIndex(
@@ -383,7 +410,6 @@ class VisInicio(QWidget):
 
     def mostrar_editar_maestro(self, maestro):
 
-        # Eliminar formulario anterior si existe
         if self.pagina_editar_maestro is not None:
 
             self.paginas.removeWidget(
@@ -394,7 +420,6 @@ class VisInicio(QWidget):
 
             self.pagina_editar_maestro = None
 
-        # Crear formulario con los datos seleccionados
         self.pagina_editar_maestro = VisEditarMaestro(
             maestro
         )

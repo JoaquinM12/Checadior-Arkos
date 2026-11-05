@@ -1,23 +1,40 @@
-
 import json
 from pathlib import Path
 from datetime import datetime
 
+from Configuracion.Firebase import db
 
-# =====================================
-# RUTAS DEL ALMACENAMIENTO
-# =====================================
+
+# ==========================================================
+# CONFIGURACIÓN
+# ==========================================================
+
+COLECCION_MAESTROS = "tblMaestros"
 
 RUTA_PROYECTO = Path(__file__).resolve().parent.parent
-
 RUTA_DATOS = RUTA_PROYECTO / "DatosLocales"
-
 RUTA_MAESTROS = RUTA_DATOS / "maestros.json"
 
 
-# =====================================
-# PREPARAR ALMACENAMIENTO
-# =====================================
+# ==========================================================
+# VALIDAR IDENTIFICADOR
+# ==========================================================
+
+def es_id_maestro_valido(identificador):
+
+    identificador = str(identificador).strip()
+
+    if not identificador.startswith("MST-"):
+        return False
+
+    numero = identificador[4:]
+
+    return numero.isdigit()
+
+
+# ==========================================================
+# PREPARAR ALMACENAMIENTO LOCAL
+# ==========================================================
 
 def preparar_almacenamiento():
 
@@ -42,88 +59,124 @@ def preparar_almacenamiento():
             )
 
 
-# =====================================
-# CARGAR MAESTROS
-# =====================================
+# ==========================================================
+# REFERENCIA A LA COLECCIÓN
+# ==========================================================
+
+def obtener_coleccion_maestros():
+
+    return db.collection(COLECCION_MAESTROS)
+
+
+# ==========================================================
+# CARGAR MAESTROS DESDE FIREBASE
+# ==========================================================
 
 def cargar_maestros():
 
-    preparar_almacenamiento()
-
     print("\n========== CARGA DE MAESTROS ==========")
-    print("Archivo utilizado:", RUTA_MAESTROS)
+    print("Origen: Firebase Firestore")
+    print("Colección:", COLECCION_MAESTROS)
 
     try:
 
-        with open(
-            RUTA_MAESTROS,
-            "r",
-            encoding="utf-8"
-        ) as archivo:
+        documentos = obtener_coleccion_maestros().stream()
 
-            datos = json.load(archivo)
+        maestros = []
 
-        if not isinstance(datos, list):
-            raise ValueError(
-                "El archivo no contiene una lista de maestros."
-            )
+        for documento in documentos:
 
-        print("Datos encontrados:", datos)
-        print("Cantidad de maestros:", len(datos))
+            identificador = documento.id
+
+            # Ignorar documentos con ID automático de Firebase
+            if not es_id_maestro_valido(identificador):
+                print("Documento ignorado:", identificador)
+                continue
+
+            maestro = documento.to_dict() or {}
+
+            nombre = str(maestro.get("nombre", "")).strip()
+            apellidos = str(maestro.get("apellidos", "")).strip()
+
+            # Ignorar registros incompletos
+            if not nombre or not apellidos:
+                print("Maestro incompleto ignorado:", identificador)
+                continue
+
+            maestro["id"] = identificador
+
+            maestros.append(maestro)
+
+        maestros.sort(
+            key=lambda maestro: int(maestro["id"].split("-")[1])
+        )
+
+        print("Cantidad de maestros:", len(maestros))
         print("=======================================\n")
 
-        return datos
+        return maestros
 
-    except json.JSONDecodeError as error:
+    except Exception as error:
 
-        raise ValueError(
-            "El archivo maestros.json tiene un formato incorrecto."
-        ) from error
+        print("ERROR AL CARGAR MAESTROS:", error)
+        raise
 
 
-# =====================================
-# GUARDAR MAESTROS
-# =====================================
+# ==========================================================
+# GUARDAR MAESTROS EN FIREBASE
+# ==========================================================
 
 def guardar_maestros(maestros):
 
     if not isinstance(maestros, list):
+
         raise ValueError(
             "Los datos de maestros deben estar en una lista."
         )
 
-    preparar_almacenamiento()
-
-    archivo_temporal = RUTA_MAESTROS.with_suffix(".tmp")
-
     try:
 
-        with open(
-            archivo_temporal,
-            "w",
-            encoding="utf-8"
-        ) as archivo:
+        coleccion = obtener_coleccion_maestros()
 
-            json.dump(
-                maestros,
-                archivo,
-                ensure_ascii=False,
-                indent=4
-            )
+        for inicio in range(0, len(maestros), 450):
 
-        archivo_temporal.replace(RUTA_MAESTROS)
+            lote = db.batch()
 
-    except Exception:
+            grupo = maestros[inicio:inicio + 450]
 
-        if archivo_temporal.exists():
-            archivo_temporal.unlink()
+            for maestro in grupo:
 
+                identificador = str(
+                    maestro.get("id", "")
+                ).strip()
+
+                if not es_id_maestro_valido(identificador):
+
+                    raise ValueError(
+                        f"Identificador de maestro inválido: {identificador}"
+                    )
+
+                datos = maestro.copy()
+                datos["id"] = identificador
+
+                referencia = coleccion.document(identificador)
+
+                # Guardar sin eliminar otros documentos
+                lote.set(referencia, datos)
+
+            lote.commit()
+
+        print("Maestros guardados correctamente en Firebase.")
+
+    except Exception as error:
+
+        print("ERROR AL GUARDAR MAESTROS:", error)
         raise
 
 
-# =====================================
+# ==========================================================
 # GENERAR ID AUTOMÁTICO
-# =====================================
+# ==========================================================
 
 def generar_id_maestro(maestros=None):
 
@@ -138,27 +191,20 @@ def generar_id_maestro(maestros=None):
             maestro.get("id", "")
         ).strip()
 
-        if identificador.startswith("MST-"):
+        if es_id_maestro_valido(identificador):
 
-            try:
-
-                numero = int(
-                    identificador.split("-")[1]
-                )
-
-                numeros.append(numero)
-
-            except (ValueError, IndexError):
-                continue
+            numeros.append(
+                int(identificador.split("-")[1])
+            )
 
     siguiente = max(numeros, default=0) + 1
 
     return f"MST-{siguiente:04d}"
 
 
-# =====================================
+# ==========================================================
 # REGISTRAR NUEVO MAESTRO
-# =====================================
+# ==========================================================
 
 def registrar_maestro(nombre, apellidos):
 
@@ -171,33 +217,45 @@ def registrar_maestro(nombre, apellidos):
             "Debes ingresar nombre y apellidos."
         )
 
-    maestros = cargar_maestros()
+    try:
 
-    nuevo_maestro = {
+        maestros = cargar_maestros()
 
-        "id": generar_id_maestro(maestros),
+        identificador = generar_id_maestro(maestros)
 
-        "nombre": nombre,
+        nuevo_maestro = {
 
-        "apellidos": apellidos,
+            "id": identificador,
+            "nombre": nombre,
+            "apellidos": apellidos,
+            "activo": True,
 
-        "activo": True,
+            "fecha_registro": datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
-        "fecha_registro": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
+        }
+
+        referencia = obtener_coleccion_maestros().document(
+            identificador
         )
-    }
 
-    maestros.append(nuevo_maestro)
+        # Evitar sobrescribir un documento existente
+        referencia.create(nuevo_maestro)
 
-    guardar_maestros(maestros)
+        print("Maestro registrado:", identificador)
 
-    return nuevo_maestro
+        return nuevo_maestro
+
+    except Exception as error:
+
+        print("ERROR AL REGISTRAR MAESTRO:", error)
+        raise
 
 
-# =====================================
+# ==========================================================
 # ACTUALIZAR MAESTRO
-# =====================================
+# ==========================================================
 
 def actualizar_maestro(
     id_maestro,
@@ -215,38 +273,177 @@ def actualizar_maestro(
             "Debes ingresar nombre y apellidos."
         )
 
-    maestros = cargar_maestros()
+    if not es_id_maestro_valido(id_maestro):
 
-    for maestro in maestros:
+        raise ValueError(
+            "El identificador del maestro no es válido."
+        )
 
-        if maestro.get("id") == id_maestro:
+    try:
 
-            maestro["nombre"] = nombre
+        referencia = obtener_coleccion_maestros().document(
+            id_maestro
+        )
 
-            maestro["apellidos"] = apellidos
+        documento = referencia.get()
 
-            maestro["activo"] = bool(activo)
+        if not documento.exists:
 
-            guardar_maestros(maestros)
+            raise ValueError(
+                "No se encontró el maestro seleccionado."
+            )
 
-            return maestro
+        datos_actualizados = {
 
-    raise ValueError(
-        "No se encontró el maestro seleccionado."
-    )
+            "nombre": nombre,
+            "apellidos": apellidos,
+            "activo": bool(activo)
+
+        }
+
+        referencia.update(datos_actualizados)
+
+        maestro = documento.to_dict()
+        maestro.update(datos_actualizados)
+        maestro["id"] = id_maestro
+
+        print("Maestro actualizado:", id_maestro)
+
+        return maestro
+
+    except Exception as error:
+
+        print("ERROR AL ACTUALIZAR MAESTRO:", error)
+        raise
 
 
-# =====================================
+# ==========================================================
 # BUSCAR MAESTRO POR ID
-# =====================================
+# ==========================================================
 
 def buscar_maestro(id_maestro):
 
-    maestros = cargar_maestros()
+    if not es_id_maestro_valido(id_maestro):
+        return None
 
-    for maestro in maestros:
+    try:
 
-        if maestro.get("id") == id_maestro:
-            return maestro
+        referencia = obtener_coleccion_maestros().document(
+            id_maestro
+        )
 
-    return None
+        documento = referencia.get()
+
+        if not documento.exists:
+            return None
+
+        maestro = documento.to_dict() or {}
+
+        if not maestro.get("nombre") or not maestro.get("apellidos"):
+            return None
+
+        maestro["id"] = documento.id
+
+        return maestro
+
+    except Exception as error:
+
+        print("ERROR AL BUSCAR MAESTRO:", error)
+        raise
+
+
+# ==========================================================
+# MIGRAR MAESTROS LOCALES A FIREBASE
+# ==========================================================
+
+def migrar_maestros_locales_a_firebase():
+
+    preparar_almacenamiento()
+
+    print("\n========== MIGRACIÓN A FIREBASE ==========")
+
+    try:
+
+        with open(
+            RUTA_MAESTROS,
+            "r",
+            encoding="utf-8"
+        ) as archivo:
+
+            maestros_locales = json.load(archivo)
+
+        if not isinstance(maestros_locales, list):
+
+            raise ValueError(
+                "El archivo maestros.json no contiene una lista."
+            )
+
+        coleccion = obtener_coleccion_maestros()
+
+        documentos_actuales = {
+            documento.id
+            for documento in coleccion.stream()
+        }
+
+        migrados = 0
+        omitidos = 0
+
+        batch = db.batch()
+        operaciones_lote = 0
+
+        for maestro in maestros_locales:
+
+            identificador = str(
+                maestro.get("id", "")
+            ).strip()
+
+            # Solo migrar identificadores MST válidos
+            if not es_id_maestro_valido(identificador):
+
+                omitidos += 1
+                continue
+
+            if identificador in documentos_actuales:
+
+                omitidos += 1
+                continue
+
+            datos = maestro.copy()
+            datos["id"] = identificador
+
+            referencia = coleccion.document(identificador)
+
+            batch.set(referencia, datos)
+
+            migrados += 1
+            operaciones_lote += 1
+
+            if operaciones_lote >= 450:
+
+                batch.commit()
+
+                batch = db.batch()
+                operaciones_lote = 0
+
+        if operaciones_lote > 0:
+            batch.commit()
+
+        resultado = {
+
+            "migrados": migrados,
+            "omitidos": omitidos,
+            "total_locales": len(maestros_locales)
+
+        }
+
+        print("Migración terminada.")
+        print("Maestros migrados:", migrados)
+        print("Maestros omitidos:", omitidos)
+        print("==========================================\n")
+
+        return resultado
+
+    except Exception as error:
+
+        print("ERROR EN LA MIGRACIÓN:", error)
+        raise

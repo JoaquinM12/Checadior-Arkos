@@ -1,3 +1,4 @@
+
 import cv2
 import numpy as np
 
@@ -21,9 +22,9 @@ from Servicios.ServicioParpadeo import DetectorParpadeo
 
 class VisChecador(QWidget):
 
-    # ================================================
+    # ==================================================
     # CONFIGURACION DE SEGURIDAD
-    # ================================================
+    # ==================================================
 
     INTERVALO_RECONOCIMIENTO = 15
 
@@ -42,51 +43,55 @@ class VisChecador(QWidget):
 
     DETECCIONES_NECESARIAS = 4
 
-    # Similitud mínima entre cajas consecutivas.
     UMBRAL_ESTABILIDAD = 0.35
+
+    # Tiempo que se muestra el mensaje de identidad no reconocida.
+    TIEMPO_RESULTADO_FALLIDO = 2500
+
+    # ==================================================
+    # INICIALIZACION
+    # ==================================================
 
     def __init__(self):
 
         super().__init__()
 
         self.camara = None
-
         self.contador_frames = 0
 
-        # ============================================
-        # INSTANCIA DEL DETECTOR DE PARPADEO
-        # ============================================
+        # Detector de parpadeo
         self.validador_parpadeo = DetectorParpadeo()
         self.parpadeo_confirmado = False
 
-        # ============================================
-        # ESTABILIDAD DE DETECCION
-        # ============================================
-
+        # Estabilidad de deteccion
         self.contador_detecciones = 0
         self.ultima_caja_detectada = None
         self.deteccion_confirmada = False
 
-        # ============================================
-        # CONFIRMACION DE IDENTIDAD
-        # ============================================
-
+        # Confirmacion de identidad
         self.ultimo_id_candidato = None
         self.confirmaciones = 0
 
         self.maestro_confirmado = None
         self.resultado_reconocimiento = None
 
-        # ============================================
-        # CONFIRMACION ANTI-SPOOFING
-        # ============================================
-
+        # Anti-spoofing
         self.contador_rostro_real = 0
         self.ultimo_resultado_anti_spoof = None
 
-        # ============================================
+        # Estado para mostrar resultado fallido
+        self.mostrar_resultado_fallido = False
+
+        # Temporizador para regresar al inicio
+        self.timer_resultado = QTimer(self)
+        self.timer_resultado.setSingleShot(True)
+        self.timer_resultado.timeout.connect(
+            self.finalizar_intento_no_reconocido
+        )
+
+        # ==================================================
         # CARGAR MODELO YUNET
-        # ============================================
+        # ==================================================
 
         ruta_proyecto = Path(__file__).resolve().parent.parent
 
@@ -114,12 +119,13 @@ class VisChecador(QWidget):
 
         self.crear_interfaz()
 
+        # Temporizador principal de cámara
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.actualizar_frame)
 
-    # ================================================
+    # ==================================================
     # INTERFAZ
-    # ================================================
+    # ==================================================
 
     def crear_interfaz(self):
 
@@ -129,7 +135,6 @@ class VisChecador(QWidget):
         layout.setSpacing(15)
 
         titulo = QLabel("CHECADOR FACIAL ARKOS")
-
         titulo.setAlignment(Qt.AlignCenter)
 
         titulo.setStyleSheet("""
@@ -229,7 +234,6 @@ class VisChecador(QWidget):
         )
 
         botones = QHBoxLayout()
-
         botones.setSpacing(15)
 
         botones.addWidget(self.btn_iniciar)
@@ -241,54 +245,118 @@ class VisChecador(QWidget):
         layout.addWidget(self.lbl_maestro)
         layout.addLayout(botones)
 
-    # ================================================
-    # REINICIAR ESTABILIDAD DE DETECCION
-    # ================================================
+    # ==================================================
+    # REINICIAR ESTABILIDAD
+    # ==================================================
 
     def reiniciar_deteccion(self):
 
         self.contador_detecciones = 0
-
         self.ultima_caja_detectada = None
-
         self.deteccion_confirmada = False
 
-    # ================================================
+    # ==================================================
     # REINICIAR IDENTIFICACION
-    # ================================================
+    # ==================================================
 
     def reiniciar_identificacion(self):
 
         self.ultimo_id_candidato = None
-
         self.confirmaciones = 0
 
         self.maestro_confirmado = None
-
         self.resultado_reconocimiento = None
 
         self.contador_rostro_real = 0
-
         self.ultimo_resultado_anti_spoof = None
-        
+
         self.parpadeo_confirmado = False
         self.validador_parpadeo.reiniciar()
 
-    # ================================================
+    # ==================================================
     # REINICIAR TODO EL PROCESO
-    # ================================================
+    # ==================================================
 
     def reiniciar_proceso(self):
 
         self.reiniciar_deteccion()
-
         self.reiniciar_identificacion()
 
         self.contador_frames = 0
 
-    # ================================================
-    # COMPARAR POSICION DE DOS DETECCIONES
-    # ================================================
+    # ==================================================
+    # MOSTRAR MAESTRO NO RECONOCIDO
+    # ==================================================
+
+    def mostrar_maestro_no_reconocido(self, mensaje=None):
+
+        if self.mostrar_resultado_fallido:
+            return
+
+        # Limpiar los datos de identificación.
+        # No reiniciar todavía el detector de parpadeo.
+
+        self.ultimo_id_candidato = None
+        self.confirmaciones = 0
+
+        self.maestro_confirmado = None
+        self.resultado_reconocimiento = None
+
+        self.contador_rostro_real = 0
+        self.ultimo_resultado_anti_spoof = None
+
+        # Bloquear temporalmente el procesamiento.
+        self.mostrar_resultado_fallido = True
+
+        self.lbl_estado.setText(
+            "IDENTIDAD NO CONFIRMADA"
+        )
+
+        self.lbl_maestro.setText(
+            mensaje or "MAESTRO NO RECONOCIDO"
+        )
+
+        print(
+            "[CHECADOR] Maestro no reconocido. "
+            "Mostrando resultado."
+        )
+
+        # Mostrar el mensaje durante 2.5 segundos.
+        self.timer_resultado.start(
+            self.TIEMPO_RESULTADO_FALLIDO
+        )
+
+    # ==================================================
+    # FINALIZAR INTENTO FALLIDO
+    # ==================================================
+
+    def finalizar_intento_no_reconocido(self):
+
+        if self.camara is None:
+            self.mostrar_resultado_fallido = False
+            return
+
+        print(
+            "[CHECADOR] Finalizando intento fallido. "
+            "Preparando nuevo intento."
+        )
+
+        self.mostrar_resultado_fallido = False
+
+        # Reiniciar todo, incluido el detector de parpadeo.
+        self.reiniciar_proceso()
+
+        self.lbl_estado.setText(
+            "PRUEBA DE VIDA (PARPADEO)"
+        )
+
+        self.lbl_maestro.setText(
+            "Por favor, parpadee frente a la camara..."
+        )
+
+    # ==================================================
+    # COMPARAR POSICION DE DETECCIONES
+    # ==================================================
 
     def calcular_iou(self, caja1, caja2):
 
@@ -298,8 +366,15 @@ class VisChecador(QWidget):
         izquierda = max(x1, x2)
         arriba = max(y1, y2)
 
-        derecha = min(x1 + w1, x2 + w2)
-        abajo = min(y1 + h1, y2 + h2)
+        derecha = min(
+            x1 + w1,
+            x2 + w2
+        )
+
+        abajo = min(
+            y1 + h1,
+            y2 + h2
+        )
 
         ancho_interseccion = max(
             0,
@@ -327,11 +402,17 @@ class VisChecador(QWidget):
 
         return area_interseccion / area_union
 
-    # ================================================
+    # ==================================================
     # CONFIRMAR ESTABILIDAD DEL ROSTRO
-    # ================================================
+    # ==================================================
 
-    def confirmar_deteccion(self, x, y, ancho, alto):
+    def confirmar_deteccion(
+        self,
+        x,
+        y,
+        ancho,
+        alto
+    ):
 
         caja_actual = (
             x,
@@ -343,9 +424,7 @@ class VisChecador(QWidget):
         if self.ultima_caja_detectada is None:
 
             self.contador_detecciones = 1
-
             self.ultima_caja_detectada = caja_actual
-
             self.deteccion_confirmada = False
 
             return False
@@ -362,7 +441,6 @@ class VisChecador(QWidget):
         else:
 
             self.contador_detecciones = 1
-
             self.deteccion_confirmada = False
 
         self.ultima_caja_detectada = caja_actual
@@ -376,9 +454,9 @@ class VisChecador(QWidget):
 
         return self.deteccion_confirmada
 
-    # ================================================
+    # ==================================================
     # INICIAR CAMARA
-    # ================================================
+    # ==================================================
 
     def iniciar_camara(self):
 
@@ -401,12 +479,14 @@ class VisChecador(QWidget):
             )
 
             self.camara.release()
-
             self.camara = None
 
             return
 
         self.reiniciar_proceso()
+
+        self.mostrar_resultado_fallido = False
+        self.timer_resultado.stop()
 
         self.lbl_estado.setText(
             "Buscando rostro..."
@@ -418,9 +498,9 @@ class VisChecador(QWidget):
 
         self.timer.start(30)
 
-    # ================================================
+    # ==================================================
     # FILTRO DE CALIDAD FACIAL
-    # ================================================
+    # ==================================================
 
     def validar_calidad_rostro(
         self,
@@ -443,8 +523,15 @@ class VisChecador(QWidget):
         x1 = max(0, x)
         y1 = max(0, y)
 
-        x2 = min(ancho_frame, x + ancho)
-        y2 = min(alto_frame, y + alto)
+        x2 = min(
+            ancho_frame,
+            x + ancho
+        )
+
+        y2 = min(
+            alto_frame,
+            y + alto
+        )
 
         if x2 <= x1 or y2 <= y1:
 
@@ -482,9 +569,9 @@ class VisChecador(QWidget):
 
         return True, "Calidad facial correcta."
 
-    # ================================================
+    # ==================================================
     # PROCESAR ANTI-SPOOFING
-    # ================================================
+    # ==================================================
 
     def procesar_anti_spoofing(
         self,
@@ -568,11 +655,17 @@ class VisChecador(QWidget):
 
         return True
 
-    # ================================================
+    # ==================================================
     # PROCESAR RECONOCIMIENTO
-    # ================================================
+    # ==================================================
 
     def procesar_reconocimiento(self, frame_original):
+
+        # Evitar procesar más de una vez mientras se
+        # muestra el mensaje de maestro no reconocido.
+
+        if self.mostrar_resultado_fallido:
+            return
 
         resultado = reconocer_imagen(
             frame_original
@@ -580,17 +673,13 @@ class VisChecador(QWidget):
 
         if not resultado.get("reconocido"):
 
-            self.reiniciar_identificacion()
-
-            self.lbl_estado.setText(
-                "IDENTIDAD NO CONFIRMADA"
+            mensaje = resultado.get(
+                "mensaje",
+                "MAESTRO NO RECONOCIDO"
             )
 
-            self.lbl_maestro.setText(
-                resultado.get(
-                    "mensaje",
-                    "Rostro no reconocido."
-                )
+            self.mostrar_maestro_no_reconocido(
+                mensaje
             )
 
             return
@@ -601,7 +690,9 @@ class VisChecador(QWidget):
 
         if not maestro_id:
 
-            self.reiniciar_identificacion()
+            self.mostrar_maestro_no_reconocido(
+                "MAESTRO NO RECONOCIDO"
+            )
 
             return
 
@@ -612,9 +703,7 @@ class VisChecador(QWidget):
         else:
 
             self.ultimo_id_candidato = maestro_id
-
             self.confirmaciones = 1
-
             self.maestro_confirmado = None
 
         if (
@@ -623,7 +712,6 @@ class VisChecador(QWidget):
         ):
 
             self.maestro_confirmado = resultado
-
             self.resultado_reconocimiento = resultado
 
             self.lbl_estado.setText(
@@ -645,9 +733,9 @@ class VisChecador(QWidget):
                 f"{self.CONFIRMACIONES_NECESARIAS}"
             )
 
-    # ================================================
+    # ==================================================
     # ACTUALIZAR CAMARA
-    # ================================================
+    # ==================================================
 
     def actualizar_frame(self):
 
@@ -664,6 +752,16 @@ class VisChecador(QWidget):
             1
         )
 
+        # ==============================================
+        # PAUSA PARA MOSTRAR RESULTADO NO RECONOCIDO
+        # ==============================================
+
+        if self.mostrar_resultado_fallido:
+
+            self._mostrar_frame_en_interfaz(frame)
+
+            return
+
         alto, ancho = frame.shape[:2]
 
         self.detector_yunet.setInputSize(
@@ -679,9 +777,9 @@ class VisChecador(QWidget):
 
         cantidad = len(rostros)
 
-        # ============================================
+        # ==============================================
         # NINGUN ROSTRO
-        # ============================================
+        # ==============================================
 
         if cantidad == 0:
 
@@ -695,9 +793,9 @@ class VisChecador(QWidget):
                 "Colocate frente a la camara."
             )
 
-        # ============================================
+        # ==============================================
         # VARIOS ROSTROS
-        # ============================================
+        # ==============================================
 
         elif cantidad > 1:
 
@@ -736,9 +834,9 @@ class VisChecador(QWidget):
                     2
                 )
 
-        # ============================================
+        # ==============================================
         # UN SOLO ROSTRO
-        # ============================================
+        # ==============================================
 
         else:
 
@@ -753,9 +851,9 @@ class VisChecador(QWidget):
                 rostro[14]
             )
 
-            # ========================================
+            # ==========================================
             # VALIDAR CONFIANZA
-            # ========================================
+            # ==========================================
 
             if (
                 confianza_detector
@@ -774,9 +872,9 @@ class VisChecador(QWidget):
 
             else:
 
-                # ====================================
+                # ======================================
                 # VALIDAR CALIDAD
-                # ====================================
+                # ======================================
 
                 calidad_correcta, mensaje = (
                     self.validar_calidad_rostro(
@@ -802,9 +900,9 @@ class VisChecador(QWidget):
 
                 else:
 
-                    # ================================
+                    # ==================================
                     # CONFIRMAR ESTABILIDAD
-                    # ================================
+                    # ==================================
 
                     deteccion_estable = (
                         self.confirmar_deteccion(
@@ -835,30 +933,59 @@ class VisChecador(QWidget):
 
                         self.contador_frames += 1
 
-                        # ============================
-                        # 1. EVALUAR PARPADEO (PRUEBA DE VIDA)
-                        # ============================
+                        # ==================================
+                        # 1. EVALUAR PARPADEO
+                        # ==================================
+
                         if not self.parpadeo_confirmado:
-                            self.parpadeo_confirmado = self.validador_parpadeo.evaluar_fotograma(frame)
-                            
+
+                            self.parpadeo_confirmado = (
+                                self.validador_parpadeo.evaluar_fotograma(
+                                    frame
+                                )
+                            )
+
                             if not self.parpadeo_confirmado:
-                                self.lbl_estado.setText("PRUEBA DE VIDA (PARPADEO)")
-                                self.lbl_maestro.setText("Por favor, parpadee frente a la camara...")
-                                
-                                # Dibujar recuadro de espera de parpadeo
+
+                                self.lbl_estado.setText(
+                                    "PRUEBA DE VIDA (PARPADEO)"
+                                )
+
+                                self.lbl_maestro.setText(
+                                    "Por favor, parpadee frente a la camara..."
+                                )
+
                                 color = (0, 165, 255)
+
                                 texto = "PARPADEE..."
-                                
-                                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
-                                cv2.putText(frame, texto, (x, max(y - 10, 25)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                                
-                                # Mostrar imagen actual y salir del ciclo de este frame
-                                self._mostrar_frame_en_interfaz(frame)
+
+                                cv2.rectangle(
+                                    frame,
+                                    (x, y),
+                                    (x + w, y + h),
+                                    color,
+                                    3
+                                )
+
+                                cv2.putText(
+                                    frame,
+                                    texto,
+                                    (x, max(y - 10, 25)),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.6,
+                                    color,
+                                    2
+                                )
+
+                                self._mostrar_frame_en_interfaz(
+                                    frame
+                                )
+
                                 return
 
-                        # ============================
+                        # ==================================
                         # 2. EJECUTAR ANTI-SPOOFING
-                        # ============================
+                        # ==================================
 
                         if (
                             self.contador_frames
@@ -875,9 +1002,9 @@ class VisChecador(QWidget):
                                 )
                             )
 
-                            # ========================
+                            # ==================================
                             # 3. EJECUTAR RECONOCIMIENTO
-                            # ========================
+                            # ==================================
 
                             if seguridad_validada:
 
@@ -885,20 +1012,18 @@ class VisChecador(QWidget):
                                     frame_original
                                 )
 
-                        # =================================
+                        # ==================================
                         # DIBUJAR RECUADRO
-                        # =================================
+                        # ==================================
 
                         if not deteccion_estable:
 
                             color = (0, 165, 255)
-
                             texto = "CONFIRMANDO ROSTRO"
 
                         elif self.maestro_confirmado:
 
                             color = (0, 255, 0)
-
                             texto = "IDENTIDAD CONFIRMADA"
 
                         elif (
@@ -907,13 +1032,11 @@ class VisChecador(QWidget):
                         ):
 
                             color = (0, 255, 255)
-
                             texto = "ROSTRO VALIDADO"
 
                         else:
 
                             color = (0, 165, 255)
-
                             texto = "VERIFICANDO SEGURIDAD"
 
                         cv2.rectangle(
@@ -934,13 +1057,18 @@ class VisChecador(QWidget):
                             2
                         )
 
-        # ============================================
+        # ==============================================
         # MOSTRAR IMAGEN
-        # ============================================
+        # ==============================================
+
         self._mostrar_frame_en_interfaz(frame)
 
+    # ==================================================
+    # MOSTRAR IMAGEN EN INTERFAZ
+    # ==================================================
+
     def _mostrar_frame_en_interfaz(self, frame):
-        """Método auxiliar para renderizar el frame en el QLabel de la interfaz"""
+
         frame_rgb = cv2.cvtColor(
             frame,
             cv2.COLOR_BGR2RGB
@@ -968,18 +1096,22 @@ class VisChecador(QWidget):
             )
         )
 
-    # ================================================
+    # ==================================================
     # DETENER CAMARA
-    # ================================================
+    # ==================================================
 
     def detener_camara(self):
 
         self.timer.stop()
 
+        # Detener también el temporizador del resultado.
+        self.timer_resultado.stop()
+
+        self.mostrar_resultado_fallido = False
+
         if self.camara is not None:
 
             self.camara.release()
-
             self.camara = None
 
         self.reiniciar_proceso()
@@ -1000,9 +1132,9 @@ class VisChecador(QWidget):
             "Ningun maestro identificado"
         )
 
-    # ================================================
+    # ==================================================
     # CERRAR APLICACION
-    # ================================================
+    # ==================================================
 
     def closeEvent(self, event):
 
