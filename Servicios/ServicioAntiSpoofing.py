@@ -1,4 +1,3 @@
-
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -19,21 +18,36 @@ RUTA_MODELO = (
     / "minifasnet_v2.onnx"
 )
 
+RUTA_DEBUG = (
+    RUTA_PROYECTO
+    / "DatosLocales"
+    / "debug_antispoof.jpg"
+)
+
 
 # ==========================================================
 # CONFIGURACION
 # ==========================================================
 
-TAMANO_MODELO = 80
-FACTOR_EXPANSION = 2.7
+TAMANO_ENTRADA = 80
+ESCALA_RECORTE = 4.0
 
-# Umbral provisional para aceptar un rostro.
-# Se calibrara posteriormente con pruebas reales.
-UMBRAL_REAL = 0.80
+# Umbral de aceptación (puedes ajustarlo entre 0.70 y 0.85 según necesites)
+UMBRAL_ACEPTACION = 0.95
 
-_sesion = None
-_nombre_entrada = None
-_nombre_salida = None
+# ----------------------------------------------------------
+# ORDEN DE CLASES CORREGIDO SEGÚN TUS LOGS:
+# Clase 2 arrojaba el 99.38% con tu rostro real.
+# ----------------------------------------------------------
+CLASE_FOTOGRAFIA = 0
+CLASE_REAL = 2        
+CLASE_PANTALLA = 1    
+
+ORDEN_CLASES_VERIFICADO = True
+
+sesion = None
+entrada_modelo = None
+salida_modelo = None
 
 
 # ==========================================================
@@ -42,54 +56,108 @@ _nombre_salida = None
 
 def cargar_modelo():
 
-    global _sesion
-    global _nombre_entrada
-    global _nombre_salida
-
-    if _sesion is not None:
-        return True
+    global sesion
+    global entrada_modelo
+    global salida_modelo
 
     if not RUTA_MODELO.exists():
         raise FileNotFoundError(
-            f"No se encontro el modelo: {RUTA_MODELO}"
+            f"No se encontró el modelo: {RUTA_MODELO}"
         )
 
     opciones = ort.SessionOptions()
+    opciones.log_severity_level = 3
 
-    opciones.graph_optimization_level = (
-        ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    )
-
-    opciones.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-
-    _sesion = ort.InferenceSession(
+    nueva_sesion = ort.InferenceSession(
         str(RUTA_MODELO),
         sess_options=opciones,
         providers=["CPUExecutionProvider"]
     )
 
-    entradas = _sesion.get_inputs()
-    salidas = _sesion.get_outputs()
+    entrada = nueva_sesion.get_inputs()[0]
+    salida = nueva_sesion.get_outputs()[0]
 
-    if not entradas or not salidas:
-        raise RuntimeError("El modelo no tiene entradas o salidas.")
+    print("\n========== INFORMACIÓN MINIFASNET ==========")
+    print("Modelo:", RUTA_MODELO)
+    print("Entrada:", entrada.name)
+    print("Forma:", entrada.shape)
+    print("Tipo:", entrada.type)
+    print("Salida:", salida.name)
+    print("Forma:", salida.shape)
+    print("Tipo:", salida.type)
+    print("Proveedor:", nueva_sesion.get_providers())
+    print("============================================\n")
 
-    forma = entradas[0].shape
+    sesion = nueva_sesion
+    entrada_modelo = entrada.name
+    salida_modelo = salida.name
 
-    if len(forma) != 4 or forma[1:] != [3, 80, 80]:
-        raise RuntimeError(
-            f"Entrada incompatible con MiniFASNet: {forma}"
-        )
 
-    if len(salidas[0].shape) != 2 or salidas[0].shape[-1] != 3:
-        raise RuntimeError(
-            f"Salida incompatible con MiniFASNet: {salidas[0].shape}"
-        )
+try:
+    cargar_modelo()
 
-    _nombre_entrada = entradas[0].name
-    _nombre_salida = salidas[0].name
+except Exception as error:
+    sesion = None
+    print("[ERROR] No se pudo cargar MiniFASNet:", error)
 
-    return True
+
+# ==========================================================
+# OBTENER CAJA FACIAL
+# ==========================================================
+
+def obtener_nueva_caja(
+    ancho_imagen,
+    alto_imagen,
+    caja,
+    escala
+):
+
+    x, y, ancho, alto = caja
+
+    if ancho <= 0 or alto <= 0:
+        raise ValueError("Caja facial no válida.")
+
+    escala_real = min(
+        (alto_imagen - 1) / alto,
+        (ancho_imagen - 1) / ancho,
+        escala
+    )
+
+    nuevo_ancho = ancho * escala_real
+    nuevo_alto = alto * escala_real
+
+    centro_x = x + ancho / 2
+    centro_y = y + alto / 2
+
+    izquierda = centro_x - nuevo_ancho / 2
+    derecha = centro_x + nuevo_ancho / 2
+
+    arriba = centro_y - nuevo_alto / 2
+    abajo = centro_y + nuevo_alto / 2
+
+    if izquierda < 0:
+        derecha -= izquierda
+        izquierda = 0
+
+    if derecha > ancho_imagen - 1:
+        izquierda -= derecha - (ancho_imagen - 1)
+        derecha = ancho_imagen - 1
+
+    if arriba < 0:
+        abajo -= arriba
+        arriba = 0
+
+    if abajo > alto_imagen - 1:
+        arriba -= abajo - (alto_imagen - 1)
+        abajo = alto_imagen - 1
+
+    izquierda = max(0, int(izquierda))
+    arriba = max(0, int(arriba))
+
+    derecha = min(ancho_imagen - 1, int(derecha))
+    abajo = min(alto_imagen - 1, int(abajo))
+
+    return izquierda, arriba, derecha, abajo
 
 
 # ==========================================================
@@ -98,76 +166,108 @@ def cargar_modelo():
 
 def recortar_rostro(imagen_bgr, caja):
 
-    alto, ancho = imagen_bgr.shape[:2]
+    if imagen_bgr is None or imagen_bgr.size == 0:
+        raise ValueError("Imagen vacía.")
+
+    alto_imagen, ancho_imagen = imagen_bgr.shape[:2]
+
+    if len(caja) != 4:
+        raise ValueError("La caja debe tener cuatro coordenadas.")
 
     x1, y1, x2, y2 = map(int, caja)
 
-    w = x2 - x1
-    h = y2 - y1
+    x1 = max(0, min(x1, ancho_imagen - 1))
+    y1 = max(0, min(y1, alto_imagen - 1))
 
-    if w <= 0 or h <= 0:
-        raise ValueError("Caja facial invalida.")
+    x2 = max(0, min(x2, ancho_imagen))
+    y2 = max(0, min(y2, alto_imagen))
 
-    lado = max(w, h)
+    ancho = x2 - x1
+    alto = y2 - y1
 
-    centro_x = x1 + w / 2
-    centro_y = y1 + h / 2
+    if ancho <= 0 or alto <= 0:
+        raise ValueError("Dimensiones faciales incorrectas.")
 
-    tamano = int(lado * FACTOR_EXPANSION)
-
-    x = int(centro_x - tamano / 2)
-    y = int(centro_y - tamano / 2)
-
-    x_final = x + tamano
-    y_final = y + tamano
+    izquierda, arriba, derecha, abajo = obtener_nueva_caja(
+        ancho_imagen,
+        alto_imagen,
+        (x1, y1, ancho, alto),
+        ESCALA_RECORTE
+    )
 
     recorte = imagen_bgr[
-        max(0, y):min(alto, y_final),
-        max(0, x):min(ancho, x_final)
+        arriba:abajo + 1,
+        izquierda:derecha + 1
     ]
 
     if recorte.size == 0:
-        raise ValueError("No se pudo recortar el rostro.")
+        raise ValueError("Recorte facial vacío.")
 
-    arriba = max(0, -y)
-    izquierda = max(0, -x)
-    abajo = max(0, y_final - alto)
-    derecha = max(0, x_final - ancho)
+    RUTA_DEBUG.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    if arriba or izquierda or abajo or derecha:
-        recorte = cv2.copyMakeBorder(
-            recorte,
-            arriba,
-            abajo,
-            izquierda,
-            derecha,
-            cv2.BORDER_REFLECT_101
-        )
+    if not cv2.imwrite(str(RUTA_DEBUG), recorte):
+        raise RuntimeError("No se pudo guardar la imagen de depuración.")
 
     return recorte
 
 
 # ==========================================================
-# PREPARAR IMAGEN
+# PREPARAR ENTRADA
 # ==========================================================
 
-def preparar_imagen(imagen_bgr):
+def preparar_entrada(recorte):
 
-    if imagen_bgr is None or imagen_bgr.size == 0:
-        raise ValueError("Imagen vacia.")
+    if recorte is None or recorte.size == 0:
+        raise ValueError("Recorte vacío.")
 
     imagen = cv2.resize(
-        imagen_bgr,
-        (TAMANO_MODELO, TAMANO_MODELO),
+        recorte,
+        (TAMANO_ENTRADA, TAMANO_ENTRADA),
         interpolation=cv2.INTER_LINEAR
     )
 
-    # MiniFASNet espera BGR, no RGB.
     imagen = imagen.astype(np.float32) / 255.0
 
-    imagen = imagen.transpose(2, 0, 1)
+    imagen = np.transpose(
+        imagen,
+        (2, 0, 1)
+    )
 
-    return np.expand_dims(imagen, axis=0)
+    imagen = np.expand_dims(
+        imagen,
+        axis=0
+    )
+
+    return imagen.astype(np.float32)
+
+
+# ==========================================================
+# SOFTMAX
+# ==========================================================
+
+def aplicar_softmax(logits):
+
+    logits = np.asarray(
+        logits,
+        dtype=np.float32
+    ).reshape(-1)
+
+    if not np.all(np.isfinite(logits)):
+        raise ValueError("El modelo produjo valores no válidos.")
+
+    logits = logits - np.max(logits)
+
+    exp_logits = np.exp(logits)
+
+    suma = np.sum(exp_logits)
+
+    if suma <= 0 or not np.isfinite(suma):
+        raise ValueError("No se pudieron calcular probabilidades.")
+
+    return exp_logits / suma
 
 
 # ==========================================================
@@ -176,111 +276,130 @@ def preparar_imagen(imagen_bgr):
 
 def evaluar_rostro(imagen_bgr, caja):
 
+    if sesion is None:
+        raise RuntimeError("MiniFASNet no está cargado.")
+
+    recorte = recortar_rostro(
+        imagen_bgr,
+        caja
+    )
+
+    entrada = preparar_entrada(recorte)
+
+    resultados = sesion.run(
+        [salida_modelo],
+        {
+            entrada_modelo: entrada
+        }
+    )
+
+    logits = np.asarray(
+        resultados[0],
+        dtype=np.float32
+    ).reshape(-1)
+
+    if logits.size != 3:
+        raise ValueError(
+            f"Se esperaban 3 salidas y llegaron {logits.size}."
+        )
+
+    probabilidades = aplicar_softmax(logits)
+
+    clase = int(np.argmax(probabilidades))
+
+    print("\n========== DEBUG ANTI-SPOOFING ==========")
+    print("Logits:", logits)
+
+    for i, probabilidad in enumerate(probabilidades):
+        print(
+            f"Clase {i}: {probabilidad * 100:.2f}%"
+        )
+
+    print("Clase ganadora:", clase)
+    print("=========================================\n")
+
+    if not ORDEN_CLASES_VERIFICADO:
+        return {
+            "correcto": False,
+            "es_real": False,
+            "clase": clase,
+            "logits": logits,
+            "probabilidades": probabilidades,
+            "porcentaje_foto": float(probabilidades[0]),
+            "porcentaje_real": float(probabilidades[1]),
+            "porcentaje_pantalla": float(probabilidades[2]),
+            "mensaje": "Pendiente de verificar el orden de clases."
+        }
+
+    prob_real = float(
+        probabilidades[CLASE_REAL]
+    )
+
+    es_real = (
+        clase == CLASE_REAL
+        and prob_real >= UMBRAL_ACEPTACION
+    )
+
+    if es_real:
+        mensaje = "Rostro real."
+    elif clase == CLASE_FOTOGRAFIA:
+        mensaje = "Posible fotografía."
+    elif clase == CLASE_PANTALLA:
+        mensaje = "Posible reproducción en pantalla."
+    else:
+        mensaje = "Rostro no identificado."
+
+    return {
+        "correcto": es_real,
+        "es_real": es_real,
+        "clase": clase,
+        "logits": logits,
+        "probabilidades": probabilidades,
+        "porcentaje_foto": float(probabilidades[CLASE_FOTOGRAFIA]),
+        "porcentaje_real": prob_real,
+        "porcentaje_pantalla": float(probabilidades[CLASE_PANTALLA]),
+        "mensaje": mensaje
+    }
+
+
+# ==========================================================
+# FUNCION PARA VISCHECADOR
+# ==========================================================
+
+def procesar_anti_spoofing(
+    imagen_bgr,
+    x,
+    y,
+    ancho,
+    alto
+):
+
     try:
 
-        cargar_modelo()
+        caja = (
+            int(x),
+            int(y),
+            int(x + ancho),
+            int(y + alto)
+        )
 
-        if imagen_bgr is None or imagen_bgr.size == 0:
-            raise ValueError("No se recibio una imagen valida.")
-
-        rostro = recortar_rostro(
+        return evaluar_rostro(
             imagen_bgr,
             caja
         )
 
-        entrada = preparar_imagen(rostro)
-
-        resultado = _sesion.run(
-            [_nombre_salida],
-            {_nombre_entrada: entrada}
-        )
-
-        salida = np.asarray(
-            resultado[0],
-            dtype=np.float32
-        ).reshape(-1)
-
-        if salida.size != 3:
-            raise RuntimeError(
-                f"Se esperaban 3 clases. Recibidas: {salida.size}"
-            )
-
-        # El modelo devuelve logits.
-        # Orden documentado:
-        # 0 = fotografia impresa
-        # 1 = rostro real
-        # 2 = reproduccion en pantalla
-
-        logits = salida - np.max(salida)
-
-        probabilidades = np.exp(logits)
-        probabilidades /= np.sum(probabilidades)
-
-        prob_foto = float(probabilidades[0])
-        prob_real = float(probabilidades[1])
-        prob_pantalla = float(probabilidades[2])
-
-        clase = int(np.argmax(probabilidades))
-
-        es_real = (
-            clase == 1
-            and prob_real >= UMBRAL_REAL
-        )
-
-        if clase == 1:
-            mensaje = (
-                "Rostro aparentemente real."
-                if es_real
-                else "Confianza insuficiente para aceptar el rostro."
-            )
-
-        elif clase == 0:
-            mensaje = "Posible fotografia impresa."
-
-        else:
-            mensaje = "Posible reproduccion en pantalla."
-
-        return {
-            "correcto": True,
-            "es_real": bool(es_real),
-            "clase": clase,
-            "porcentaje_real": prob_real,
-            "porcentaje_foto": prob_foto,
-            "porcentaje_pantalla": prob_pantalla,
-            "mensaje": mensaje
-        }
-
     except Exception as error:
+
+        print("\n[ERROR ANTI-SPOOFING]")
+        print(error)
 
         return {
             "correcto": False,
             "es_real": False,
             "clase": -1,
-            "porcentaje_real": 0.0,
+            "logits": None,
             "porcentaje_foto": 0.0,
+            "porcentaje_real": 0.0,
             "porcentaje_pantalla": 0.0,
-            "mensaje": str(error)
-        }
-
-
-# ==========================================================
-# COMPROBAR MODELO
-# ==========================================================
-
-def comprobar_anti_spoofing():
-
-    try:
-
-        cargar_modelo()
-
-        return {
-            "correcto": True,
-            "mensaje": "MiniFASNet-V2 cargado correctamente."
-        }
-
-    except Exception as error:
-
-        return {
-            "correcto": False,
-            "mensaje": str(error)
+            "mensaje": "Error al evaluar el rostro."
         }

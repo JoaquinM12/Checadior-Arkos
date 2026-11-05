@@ -1,0 +1,21 @@
+# Entornos virtuales
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Variables privadas
+.env
+
+# Datos locales y biométricos
+DatosLocales/Rostros/
+DatosLocales/embeddings_rostros.json
+DatosLocales/debug_antispoof.jpg
+
+# Información personal de maestros
+DatosLocales/maestros.json
+
+# Archivos temporales
+*.log

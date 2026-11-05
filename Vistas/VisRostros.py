@@ -1,14 +1,10 @@
-
+import os
 import cv2
 
 from PySide6.QtWidgets import (
-    QWidget,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QHBoxLayout,
-    QCheckBox,
-    QMessageBox
+    QWidget, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout,
+    QCheckBox, QMessageBox
 )
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -17,6 +13,10 @@ from PySide6.QtGui import QImage, QPixmap
 from Servicios.ServicioRostros import (
     guardar_fotografia_rostro,
     contar_fotografias
+)
+
+from Servicios.ServicioReconocimiento import (
+    generar_embeddings_maestro
 )
 
 
@@ -35,6 +35,11 @@ class VisRostros(QWidget):
         self.frame_actual = None
         self.rostros_actuales = []
 
+        self.procesando = False
+        self.registro_completado = False
+
+        self.detector_rostros = None
+
         self.crear_detector()
 
         self.timer = QTimer(self)
@@ -44,24 +49,38 @@ class VisRostros(QWidget):
         self.actualizar_contador()
 
     # =====================================
-    # DETECTOR FACIAL
+    # DETECTOR FACIAL YUNET
     # =====================================
 
     def crear_detector(self):
 
-        ruta_detector = (
-            cv2.data.haarcascades +
-            "haarcascade_frontalface_default.xml"
+        ruta_base = os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
         )
 
-        self.detector_rostros = cv2.CascadeClassifier(
-            ruta_detector
+        self.ruta_modelo_yunet = os.path.join(
+            ruta_base,
+            "Recursos",
+            "ModelosIA",
+            "yunet.onnx"
         )
 
-        if self.detector_rostros.empty():
-            raise RuntimeError(
-                "No se pudo cargar el detector facial de OpenCV."
+        if not os.path.isfile(self.ruta_modelo_yunet):
+            raise FileNotFoundError(
+                f"No se encontró YuNet: {self.ruta_modelo_yunet}"
             )
+
+        self.detector_rostros = cv2.FaceDetectorYN.create(
+            self.ruta_modelo_yunet,
+            "",
+            (320, 320),
+            0.7,
+            0.3,
+            5000
+        )
+
+        print("DETECTOR YUNET CARGADO")
+        print(self.ruta_modelo_yunet)
 
     # =====================================
     # INTERFAZ
@@ -75,6 +94,7 @@ class VisRostros(QWidget):
 
         titulo = QLabel("REGISTRO FACIAL DE MAESTROS")
         titulo.setAlignment(Qt.AlignCenter)
+
         titulo.setStyleSheet("""
             font-size: 25px;
             font-weight: bold;
@@ -105,17 +125,9 @@ class VisRostros(QWidget):
             "el registro de sus fotografías faciales."
         )
 
-        self.chk_autorizacion.setStyleSheet("""
-            color: #334155;
-            font-size: 13px;
-            padding: 5px;
-        """)
-
         self.chk_autorizacion.stateChanged.connect(
             self.actualizar_estado_botones
         )
-
-        # CÁMARA
 
         self.lbl_camara = QLabel("La cámara está detenida")
         self.lbl_camara.setAlignment(Qt.AlignCenter)
@@ -127,8 +139,6 @@ class VisRostros(QWidget):
             font-size: 20px;
             border-radius: 10px;
         """)
-
-        # ESTADO
 
         self.lbl_estado = QLabel(
             "Marca la autorización para comenzar."
@@ -143,8 +153,6 @@ class VisRostros(QWidget):
             padding: 5px;
         """)
 
-        # CONTADOR
-
         self.lbl_contador = QLabel("Fotografías: 0 / 10")
         self.lbl_contador.setAlignment(Qt.AlignCenter)
 
@@ -154,20 +162,20 @@ class VisRostros(QWidget):
             font-weight: bold;
         """)
 
-        # BOTONES
-
         botones = QHBoxLayout()
-        botones.setSpacing(12)
+        botones.setSpacing(10)
 
         self.btn_iniciar = QPushButton("INICIAR CÁMARA")
         self.btn_capturar = QPushButton("CAPTURAR ROSTRO")
         self.btn_detener = QPushButton("DETENER CÁMARA")
+        self.btn_procesar = QPushButton("PROCESAR REGISTRO FACIAL")
         self.btn_volver = QPushButton("VOLVER")
 
         lista_botones = [
             self.btn_iniciar,
             self.btn_capturar,
             self.btn_detener,
+            self.btn_procesar,
             self.btn_volver
         ]
 
@@ -225,6 +233,24 @@ class VisRostros(QWidget):
             }
         """)
 
+        self.btn_procesar.setStyleSheet("""
+            QPushButton {
+                background-color: #FF851B;
+                color: white;
+                border: none;
+                border-radius: 7px;
+                font-weight: bold;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #E66F00;
+            }
+            QPushButton:disabled {
+                background-color: #CBD5E1;
+                color: #64748B;
+            }
+        """)
+
         self.btn_volver.setStyleSheet("""
             QPushButton {
                 background-color: #E2E8F0;
@@ -242,12 +268,11 @@ class VisRostros(QWidget):
         self.btn_iniciar.clicked.connect(self.iniciar_camara)
         self.btn_capturar.clicked.connect(self.capturar_rostro)
         self.btn_detener.clicked.connect(self.detener_camara)
+        self.btn_procesar.clicked.connect(self.procesar_registro_facial)
         self.btn_volver.clicked.connect(self.volver)
 
-        botones.addWidget(self.btn_iniciar)
-        botones.addWidget(self.btn_capturar)
-        botones.addWidget(self.btn_detener)
-        botones.addWidget(self.btn_volver)
+        for boton in lista_botones:
+            botones.addWidget(boton)
 
         layout.addWidget(titulo)
         layout.addWidget(self.lbl_maestro)
@@ -259,6 +284,7 @@ class VisRostros(QWidget):
 
         self.actualizar_estado_botones()
 
+        
     # =====================================
     # CONTADOR
     # =====================================
@@ -291,6 +317,8 @@ class VisRostros(QWidget):
             autorizado
             and self.camara is None
             and cantidad < self.MAX_FOTOGRAFIAS
+            and not self.procesando
+            and not self.registro_completado
         )
 
         self.btn_capturar.setEnabled(
@@ -298,6 +326,19 @@ class VisRostros(QWidget):
             and self.camara is not None
             and len(self.rostros_actuales) == 1
             and cantidad < self.MAX_FOTOGRAFIAS
+            and not self.procesando
+        )
+
+        self.btn_detener.setEnabled(
+            self.camara is not None
+        )
+
+        self.btn_procesar.setEnabled(
+            autorizado
+            and cantidad == self.MAX_FOTOGRAFIAS
+            and self.camara is None
+            and not self.procesando
+            and not self.registro_completado
         )
 
     # =====================================
@@ -307,71 +348,36 @@ class VisRostros(QWidget):
     def iniciar_camara(self):
 
         if not self.chk_autorizacion.isChecked():
-
             QMessageBox.warning(
                 self,
                 "Autorización necesaria",
-                "Primero confirma que el docente fue informado "
-                "y autorizó el registro."
+                "El docente debe autorizar el registro."
             )
-
             return
 
         if self.camara is not None:
             return
 
-        cantidad = contar_fotografias(
-            self.maestro["id"]
-        )
+        self.camara = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-        if cantidad >= self.MAX_FOTOGRAFIAS:
-
-            QMessageBox.information(
-                self,
-                "Registro completo",
-                "Este maestro ya tiene 10 fotografías."
-            )
-
-            return
-
-        self.lbl_estado.setText(
-            "Conectando con la cámara..."
-        )
-
-        self.btn_iniciar.setEnabled(False)
-
-        # Primer intento: Windows DirectShow
-        self.camara = cv2.VideoCapture(
-            0,
-            cv2.CAP_DSHOW
-        )
-
-        # Segundo intento: configuración predeterminada
         if not self.camara.isOpened():
-
             self.camara.release()
-
             self.camara = cv2.VideoCapture(0)
 
-        # Comprobar conexión
         if not self.camara.isOpened():
 
             self.camara.release()
             self.camara = None
 
-            self.lbl_camara.setText(
-                "No se pudo acceder a la cámara"
-            )
-
-            self.lbl_estado.setText(
-                "Error: verifica que la cámara esté conectada "
-                "y que ninguna otra aplicación la esté utilizando."
+            QMessageBox.critical(
+                self,
+                "Error",
+                "No se pudo acceder a la cámara."
             )
 
             self.actualizar_estado_botones()
             return
 
-        # Solicitar resolución
         self.camara.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.camara.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
@@ -384,7 +390,7 @@ class VisRostros(QWidget):
         self.actualizar_estado_botones()
 
     # =====================================
-    # ACTUALIZAR CÁMARA
+    # ACTUALIZAR FRAME CON YUNET
     # =====================================
 
     def actualizar_frame(self):
@@ -395,36 +401,51 @@ class VisRostros(QWidget):
         correcto, frame = self.camara.read()
 
         if not correcto or frame is None:
-
-            self.lbl_estado.setText(
-                "No se pudo recibir imagen de la cámara."
-            )
-
             return
 
         frame = cv2.flip(frame, 1)
 
-        gris = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2GRAY
-        )
+        alto, ancho = frame.shape[:2]
 
-        rostros = self.detector_rostros.detectMultiScale(
-            gris,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(80, 80)
-        )
+        try:
+
+            self.detector_rostros.setInputSize(
+                (ancho, alto)
+            )
+
+            _, detecciones = self.detector_rostros.detect(frame)
+
+        except cv2.error as error:
+
+            self.lbl_estado.setText(
+                f"Error YuNet: {error}"
+            )
+            return
+
+        rostros = []
+
+        if detecciones is not None:
+
+            for deteccion in detecciones:
+
+                x, y, w, h = deteccion[:4]
+
+                rostros.append((
+                    max(0, int(x)),
+                    max(0, int(y)),
+                    int(w),
+                    int(h)
+                ))
 
         self.frame_actual = frame.copy()
-        self.rostros_actuales = list(rostros)
+        self.rostros_actuales = rostros
 
-        for (x, y, ancho, alto) in rostros:
+        for x, y, w, h in rostros:
 
             cv2.rectangle(
                 frame,
                 (x, y),
-                (x + ancho, y + alto),
+                (x + w, y + h),
                 (0, 255, 0),
                 3
             )
@@ -439,24 +460,17 @@ class VisRostros(QWidget):
                 2
             )
 
-        cantidad = len(rostros)
+        if len(rostros) == 0:
+            self.lbl_estado.setText("No se detectaron rostros.")
 
-        if cantidad == 0:
-
+        elif len(rostros) == 1:
             self.lbl_estado.setText(
-                "No se detectaron rostros."
-            )
-
-        elif cantidad == 1:
-
-            self.lbl_estado.setText(
-                "Rostro detectado. Puedes capturar la fotografía."
+                "Rostro detectado. Puedes capturar."
             )
 
         else:
-
             self.lbl_estado.setText(
-                "Se detectaron varios rostros. Debe aparecer uno solo."
+                "Debe aparecer una sola persona."
             )
 
         self.actualizar_estado_botones()
@@ -467,13 +481,12 @@ class VisRostros(QWidget):
         )
 
         alto, ancho, canales = frame_rgb.shape
-        bytes_por_linea = canales * ancho
 
         imagen = QImage(
             frame_rgb.data,
             ancho,
             alto,
-            bytes_por_linea,
+            canales * ancho,
             QImage.Format_RGB888
         ).copy()
 
@@ -506,7 +519,6 @@ class VisRostros(QWidget):
                 "Rostro no válido",
                 "Debe aparecer exactamente un rostro."
             )
-
             return
 
         cantidad = contar_fotografias(
@@ -514,13 +526,6 @@ class VisRostros(QWidget):
         )
 
         if cantidad >= self.MAX_FOTOGRAFIAS:
-
-            QMessageBox.information(
-                self,
-                "Límite alcanzado",
-                "Ya se registraron las 10 fotografías."
-            )
-
             self.detener_camara()
             return
 
@@ -548,11 +553,6 @@ class VisRostros(QWidget):
         ]
 
         if rostro.size == 0:
-            QMessageBox.warning(
-                self,
-                "Error",
-                "No se pudo obtener el recorte del rostro."
-            )
             return
 
         try:
@@ -562,13 +562,13 @@ class VisRostros(QWidget):
                 rostro
             )
 
+            print("Fotografía guardada:", ruta)
+
             self.actualizar_contador()
 
             self.lbl_estado.setText(
                 "Fotografía guardada correctamente."
             )
-
-            print("Fotografía guardada:", ruta)
 
             if contar_fotografias(
                 self.maestro["id"]
@@ -578,8 +578,8 @@ class VisRostros(QWidget):
 
                 QMessageBox.information(
                     self,
-                    "Registro completado",
-                    "Se registraron las 10 fotografías del maestro."
+                    "Fotografías completadas",
+                    "Se registraron las 10 fotografías."
                 )
 
         except Exception as error:
@@ -587,8 +587,101 @@ class VisRostros(QWidget):
             QMessageBox.critical(
                 self,
                 "Error al guardar",
-                f"No se pudo guardar la fotografía:\n{error}"
+                str(error)
             )
+
+    # =====================================
+    # PROCESAR REGISTRO FACIAL
+    # =====================================
+
+    def procesar_registro_facial(self):
+
+        if not self.chk_autorizacion.isChecked():
+            return
+
+        if self.camara is not None:
+            self.detener_camara()
+
+        cantidad = contar_fotografias(
+            self.maestro["id"]
+        )
+
+        if cantidad != self.MAX_FOTOGRAFIAS:
+
+            QMessageBox.warning(
+                self,
+                "Fotografías incompletas",
+                f"Se necesitan 10 fotografías. Actualmente: {cantidad}"
+            )
+            return
+
+        respuesta = QMessageBox.question(
+            self,
+            "Procesar registro facial",
+            "Se procesarán las fotografías con AuraFace.\n¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if respuesta != QMessageBox.Yes:
+            return
+
+        self.procesando = True
+        self.actualizar_estado_botones()
+
+        self.lbl_estado.setText(
+            "Procesando registro facial..."
+        )
+
+        try:
+
+            resultado = generar_embeddings_maestro(
+                self.maestro["id"]
+            )
+
+            procesadas = resultado.get(
+                "fotografias_procesadas", 0
+            )
+
+            errores = resultado.get("errores", [])
+
+            if procesadas != self.MAX_FOTOGRAFIAS:
+
+                QMessageBox.warning(
+                    self,
+                    "Procesamiento incompleto",
+                    f"Se procesaron {procesadas} de 10 fotografías.\n\n"
+                    + "\n".join(errores)
+                )
+
+                return
+
+            self.registro_completado = True
+
+            self.lbl_estado.setText(
+                "¡Registro facial completado!"
+            )
+
+            QMessageBox.information(
+                self,
+                "Registro exitoso",
+                f"Maestro: {self.maestro.get('nombre', '')}\n"
+                f"ID: {self.maestro['id']}\n"
+                f"Fotografías procesadas: {procesadas}"
+            )
+
+        except Exception as error:
+
+            QMessageBox.critical(
+                self,
+                "Error de procesamiento",
+                str(error)
+            )
+
+        finally:
+
+            self.procesando = False
+            self.actualizar_estado_botones()
 
     # =====================================
     # DETENER CÁMARA
@@ -599,7 +692,6 @@ class VisRostros(QWidget):
         self.timer.stop()
 
         if self.camara is not None:
-
             self.camara.release()
             self.camara = None
 
@@ -607,14 +699,10 @@ class VisRostros(QWidget):
         self.rostros_actuales = []
 
         self.lbl_camara.setPixmap(QPixmap())
+        self.lbl_camara.setText("La cámara está detenida")
 
-        self.lbl_camara.setText(
-            "La cámara está detenida"
-        )
-
-        self.lbl_estado.setText(
-            "Cámara detenida."
-        )
+        if not self.procesando:
+            self.lbl_estado.setText("Cámara detenida.")
 
         self.actualizar_estado_botones()
 

@@ -1,4 +1,3 @@
-
 import cv2
 import numpy as np
 
@@ -17,6 +16,7 @@ from PySide6.QtGui import QImage, QPixmap
 
 from Controladores.ControlReconocimiento import reconocer_imagen
 from Servicios.ServicioAntiSpoofing import evaluar_rostro
+from Servicios.ServicioParpadeo import DetectorParpadeo
 
 
 class VisChecador(QWidget):
@@ -52,6 +52,12 @@ class VisChecador(QWidget):
         self.camara = None
 
         self.contador_frames = 0
+
+        # ============================================
+        # INSTANCIA DEL DETECTOR DE PARPADEO
+        # ============================================
+        self.validador_parpadeo = DetectorParpadeo()
+        self.parpadeo_confirmado = False
 
         # ============================================
         # ESTABILIDAD DE DETECCION
@@ -264,6 +270,9 @@ class VisChecador(QWidget):
         self.contador_rostro_real = 0
 
         self.ultimo_resultado_anti_spoof = None
+        
+        self.parpadeo_confirmado = False
+        self.validador_parpadeo.reiniciar()
 
     # ================================================
     # REINICIAR TODO EL PROCESO
@@ -351,9 +360,6 @@ class VisChecador(QWidget):
             self.contador_detecciones += 1
 
         else:
-
-            # La deteccion cambio demasiado.
-            # Se comienza nuevamente.
 
             self.contador_detecciones = 1
 
@@ -830,7 +836,28 @@ class VisChecador(QWidget):
                         self.contador_frames += 1
 
                         # ============================
-                        # EJECUTAR ANTI-SPOOFING
+                        # 1. EVALUAR PARPADEO (PRUEBA DE VIDA)
+                        # ============================
+                        if not self.parpadeo_confirmado:
+                            self.parpadeo_confirmado = self.validador_parpadeo.evaluar_fotograma(frame)
+                            
+                            if not self.parpadeo_confirmado:
+                                self.lbl_estado.setText("PRUEBA DE VIDA (PARPADEO)")
+                                self.lbl_maestro.setText("Por favor, parpadee frente a la camara...")
+                                
+                                # Dibujar recuadro de espera de parpadeo
+                                color = (0, 165, 255)
+                                texto = "PARPADEE..."
+                                
+                                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+                                cv2.putText(frame, texto, (x, max(y - 10, 25)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                                
+                                # Mostrar imagen actual y salir del ciclo de este frame
+                                self._mostrar_frame_en_interfaz(frame)
+                                return
+
+                        # ============================
+                        # 2. EJECUTAR ANTI-SPOOFING
                         # ============================
 
                         if (
@@ -849,7 +876,7 @@ class VisChecador(QWidget):
                             )
 
                             # ========================
-                            # EJECUTAR AURAFACE
+                            # 3. EJECUTAR RECONOCIMIENTO
                             # ========================
 
                             if seguridad_validada:
@@ -858,59 +885,62 @@ class VisChecador(QWidget):
                                     frame_original
                                 )
 
-                    # =================================
-                    # DIBUJAR RECUADRO
-                    # =================================
+                        # =================================
+                        # DIBUJAR RECUADRO
+                        # =================================
 
-                    if not deteccion_estable:
+                        if not deteccion_estable:
 
-                        color = (0, 165, 255)
+                            color = (0, 165, 255)
 
-                        texto = "CONFIRMANDO ROSTRO"
+                            texto = "CONFIRMANDO ROSTRO"
 
-                    elif self.maestro_confirmado:
+                        elif self.maestro_confirmado:
 
-                        color = (0, 255, 0)
+                            color = (0, 255, 0)
 
-                        texto = "IDENTIDAD CONFIRMADA"
+                            texto = "IDENTIDAD CONFIRMADA"
 
-                    elif (
-                        self.contador_rostro_real
-                        >= self.CONFIRMACIONES_ANTI_SPOOF
-                    ):
+                        elif (
+                            self.contador_rostro_real
+                            >= self.CONFIRMACIONES_ANTI_SPOOF
+                        ):
 
-                        color = (0, 255, 255)
+                            color = (0, 255, 255)
 
-                        texto = "ROSTRO VALIDADO"
+                            texto = "ROSTRO VALIDADO"
 
-                    else:
+                        else:
 
-                        color = (0, 165, 255)
+                            color = (0, 165, 255)
 
-                        texto = "VERIFICANDO SEGURIDAD"
+                            texto = "VERIFICANDO SEGURIDAD"
 
-                    cv2.rectangle(
-                        frame,
-                        (x, y),
-                        (x + w, y + h),
-                        color,
-                        3
-                    )
+                        cv2.rectangle(
+                            frame,
+                            (x, y),
+                            (x + w, y + h),
+                            color,
+                            3
+                        )
 
-                    cv2.putText(
-                        frame,
-                        texto,
-                        (x, max(y - 10, 25)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        color,
-                        2
-                    )
+                        cv2.putText(
+                            frame,
+                            texto,
+                            (x, max(y - 10, 25)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            color,
+                            2
+                        )
 
         # ============================================
         # MOSTRAR IMAGEN
         # ============================================
+        self._mostrar_frame_en_interfaz(frame)
 
+    def _mostrar_frame_en_interfaz(self, frame):
+        """Método auxiliar para renderizar el frame en el QLabel de la interfaz"""
         frame_rgb = cv2.cvtColor(
             frame,
             cv2.COLOR_BGR2RGB
