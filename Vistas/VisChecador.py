@@ -3,21 +3,33 @@ import cv2
 import numpy as np
 
 from pathlib import Path
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
     QPushButton,
     QVBoxLayout,
-    QHBoxLayout
+    QHBoxLayout,
+    QMessageBox
 )
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 
 from Controladores.ControlReconocimiento import reconocer_imagen
+
 from Servicios.ServicioAntiSpoofing import evaluar_rostro
 from Servicios.ServicioParpadeo import DetectorParpadeo
+
+from Servicios.ServicioAlmacenamiento import buscar_maestro
+
+from Servicios.ServicioClasesImpartidas import (
+    obtener_clase_actual,
+    buscar_registro_clase
+)
+
+from Vistas.VisRegistroClase import VisRegistroClase
 
 
 class VisChecador(QWidget):
@@ -45,7 +57,6 @@ class VisChecador(QWidget):
 
     UMBRAL_ESTABILIDAD = 0.35
 
-    # Tiempo que se muestra el mensaje de identidad no reconocida.
     TIEMPO_RESULTADO_FALLIDO = 2500
 
     # ==================================================
@@ -79,12 +90,23 @@ class VisChecador(QWidget):
         self.contador_rostro_real = 0
         self.ultimo_resultado_anti_spoof = None
 
-        # Estado para mostrar resultado fallido
+        # Resultado fallido
         self.mostrar_resultado_fallido = False
 
-        # Temporizador para regresar al inicio
+        # Control de ventana de registro
+        self.ventana_clase_abierta = False
+
+        # Evitar que la misma persona vuelva a abrir
+        # el registro sin retirar primero su rostro.
+        self.esperando_retiro_rostro = False
+
+        # Fecha y hora capturadas al confirmar identidad
+        self.fecha_hora_reconocimiento = None
+
+        # Temporizador para resultado fallido
         self.timer_resultado = QTimer(self)
         self.timer_resultado.setSingleShot(True)
+
         self.timer_resultado.timeout.connect(
             self.finalizar_intento_no_reconocido
         )
@@ -119,9 +141,12 @@ class VisChecador(QWidget):
 
         self.crear_interfaz()
 
-        # Temporizador principal de cámara
+        # Temporizador principal
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.actualizar_frame)
+
+        self.timer.timeout.connect(
+            self.actualizar_frame
+        )
 
     # ==================================================
     # INTERFAZ
@@ -135,6 +160,7 @@ class VisChecador(QWidget):
         layout.setSpacing(15)
 
         titulo = QLabel("CHECADOR FACIAL ARKOS")
+
         titulo.setAlignment(Qt.AlignCenter)
 
         titulo.setStyleSheet("""
@@ -293,9 +319,6 @@ class VisChecador(QWidget):
         if self.mostrar_resultado_fallido:
             return
 
-        # Limpiar los datos de identificación.
-        # No reiniciar todavía el detector de parpadeo.
-
         self.ultimo_id_candidato = None
         self.confirmaciones = 0
 
@@ -305,7 +328,6 @@ class VisChecador(QWidget):
         self.contador_rostro_real = 0
         self.ultimo_resultado_anti_spoof = None
 
-        # Bloquear temporalmente el procesamiento.
         self.mostrar_resultado_fallido = True
 
         self.lbl_estado.setText(
@@ -317,11 +339,9 @@ class VisChecador(QWidget):
         )
 
         print(
-            "[CHECADOR] Maestro no reconocido. "
-            "Mostrando resultado."
+            "[CHECADOR] Maestro no reconocido."
         )
 
-        # Mostrar el mensaje durante 2.5 segundos.
         self.timer_resultado.start(
             self.TIEMPO_RESULTADO_FALLIDO
         )
@@ -336,14 +356,8 @@ class VisChecador(QWidget):
             self.mostrar_resultado_fallido = False
             return
 
-        print(
-            "[CHECADOR] Finalizando intento fallido. "
-            "Preparando nuevo intento."
-        )
-
         self.mostrar_resultado_fallido = False
 
-        # Reiniciar todo, incluido el detector de parpadeo.
         self.reiniciar_proceso()
 
         self.lbl_estado.setText(
@@ -486,6 +500,8 @@ class VisChecador(QWidget):
         self.reiniciar_proceso()
 
         self.mostrar_resultado_fallido = False
+        self.esperando_retiro_rostro = False
+
         self.timer_resultado.stop()
 
         self.lbl_estado.setText(
@@ -661,10 +677,10 @@ class VisChecador(QWidget):
 
     def procesar_reconocimiento(self, frame_original):
 
-        # Evitar procesar más de una vez mientras se
-        # muestra el mensaje de maestro no reconocido.
-
         if self.mostrar_resultado_fallido:
+            return
+
+        if self.ventana_clase_abierta:
             return
 
         resultado = reconocer_imagen(
@@ -714,12 +730,33 @@ class VisChecador(QWidget):
             self.maestro_confirmado = resultado
             self.resultado_reconocimiento = resultado
 
+            # CAPTURAR LA HORA EN ESTE MOMENTO.
+            # No se vuelve a calcular al guardar los temas.
+            self.fecha_hora_reconocimiento = datetime.now()
+
             self.lbl_estado.setText(
                 "MAESTRO IDENTIFICADO Y CONFIRMADO"
             )
 
             self.lbl_maestro.setText(
-                f"{resultado['nombre']} | {maestro_id}"
+                f"{resultado.get('nombre', maestro_id)} | {maestro_id}"
+            )
+
+            print(
+                "[CHECADOR] Maestro confirmado:",
+                maestro_id
+            )
+
+            print(
+                "[CHECADOR] Hora de reconocimiento:",
+                self.fecha_hora_reconocimiento.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            )
+
+            self.abrir_registro_clase(
+                maestro_id,
+                resultado
             )
 
         else:
@@ -732,6 +769,164 @@ class VisChecador(QWidget):
                 f"Coincidencia {self.confirmaciones}/"
                 f"{self.CONFIRMACIONES_NECESARIAS}"
             )
+
+    # ==================================================
+    # ABRIR REGISTRO DE CLASE
+    # ==================================================
+
+    def abrir_registro_clase(
+        self,
+        maestro_id,
+        resultado_reconocimiento
+    ):
+
+        if self.ventana_clase_abierta:
+            return
+
+        self.ventana_clase_abierta = True
+
+        # Detener el análisis para impedir otro reconocimiento.
+        self.timer.stop()
+
+        try:
+
+            fecha_reconocimiento = (
+                self.fecha_hora_reconocimiento
+            )
+
+            # ------------------------------------------
+            # BUSCAR DATOS DEL MAESTRO EN FIREBASE
+            # ------------------------------------------
+
+            maestro = buscar_maestro(maestro_id)
+
+            if not maestro:
+
+                raise ValueError(
+                    "No se encontraron los datos del maestro en Firebase."
+                )
+
+            if not maestro.get("activo", True):
+
+                raise ValueError(
+                    "El maestro se encuentra inactivo."
+                )
+
+            nombre_completo = (
+                f"{maestro.get('nombre', '').strip()} "
+                f"{maestro.get('apellidos', '').strip()}"
+            ).strip()
+
+            maestro["nombre"] = nombre_completo
+
+            # ------------------------------------------
+            # BUSCAR CLASE VIGENTE
+            # ------------------------------------------
+
+            horario = obtener_clase_actual(
+                maestro_id,
+                fecha_reconocimiento
+            )
+
+            if not horario:
+
+                mensaje = (
+                    f"Maestro: {nombre_completo}\n\n"
+                    "No tienes una clase programada en este momento."
+                )
+
+                QMessageBox.information(
+                    self,
+                    "Sin clase programada",
+                    mensaje
+                )
+
+                return
+
+            # ------------------------------------------
+            # VERIFICAR SI YA EXISTE LA ASISTENCIA
+            # ------------------------------------------
+
+            registro_existente = buscar_registro_clase(
+                maestro_id,
+                horario.get("id"),
+                fecha_reconocimiento
+            )
+
+            if registro_existente:
+
+                QMessageBox.information(
+                    self,
+                    "Clase ya registrada",
+                    "La asistencia y los temas de esta clase "
+                    "ya fueron registrados anteriormente.\n\n"
+                    "No es necesario volver a registrarlos."
+                )
+
+                return
+
+            # ------------------------------------------
+            # ABRIR VENTANA DE REGISTRO
+            # ------------------------------------------
+
+            ventana = VisRegistroClase(
+                maestro=maestro,
+                horario=horario,
+                fecha_hora_reconocimiento=fecha_reconocimiento,
+                parent=self
+            )
+
+            ventana.exec()
+
+            if ventana.registro_guardado:
+
+                self.lbl_estado.setText(
+                    "CLASE REGISTRADA CORRECTAMENTE"
+                )
+
+                self.lbl_maestro.setText(
+                    f"{nombre_completo} | ASISTENCIA GUARDADA"
+                )
+
+                print(
+                    "[CHECADOR] Clase registrada correctamente:",
+                    horario.get("id")
+                )
+
+            else:
+
+                self.lbl_estado.setText(
+                    "REGISTRO DE CLASE CANCELADO"
+                )
+
+                self.lbl_maestro.setText(
+                    "Retira tu rostro para realizar otro intento."
+                )
+
+        except Exception as error:
+
+            print(
+                "[CHECADOR] Error al abrir registro:",
+                error
+            )
+
+            QMessageBox.critical(
+                self,
+                "Error de registro",
+                str(error)
+            )
+
+        finally:
+
+            self.ventana_clase_abierta = False
+
+            # Exigir que el maestro retire su rostro
+            # antes de comenzar un nuevo reconocimiento.
+            self.esperando_retiro_rostro = True
+
+            if self.camara is not None:
+
+                self.timer.start(30)
 
     # ==================================================
     # ACTUALIZAR CAMARA
@@ -753,7 +948,7 @@ class VisChecador(QWidget):
         )
 
         # ==============================================
-        # PAUSA PARA MOSTRAR RESULTADO NO RECONOCIDO
+        # PAUSA PARA RESULTADO NO RECONOCIDO
         # ==============================================
 
         if self.mostrar_resultado_fallido:
@@ -776,6 +971,40 @@ class VisChecador(QWidget):
             rostros = []
 
         cantidad = len(rostros)
+
+        # ==============================================
+        # ESPERAR A QUE EL MAESTRO RETIRE SU ROSTRO
+        # ==============================================
+
+        if self.esperando_retiro_rostro:
+
+            if cantidad > 0:
+
+                self.lbl_estado.setText(
+                    "REGISTRO FINALIZADO"
+                )
+
+                self.lbl_maestro.setText(
+                    "Retira tu rostro para continuar."
+                )
+
+                self._mostrar_frame_en_interfaz(frame)
+
+                return
+
+            else:
+
+                self.esperando_retiro_rostro = False
+
+                self.reiniciar_proceso()
+
+                self.lbl_estado.setText(
+                    "Buscando rostro..."
+                )
+
+                self.lbl_maestro.setText(
+                    "Esperando identificacion..."
+                )
 
         # ==============================================
         # NINGUN ROSTRO
@@ -957,8 +1186,6 @@ class VisChecador(QWidget):
 
                                 color = (0, 165, 255)
 
-                                texto = "PARPADEE..."
-
                                 cv2.rectangle(
                                     frame,
                                     (x, y),
@@ -969,7 +1196,7 @@ class VisChecador(QWidget):
 
                                 cv2.putText(
                                     frame,
-                                    texto,
+                                    "PARPADEE...",
                                     (x, max(y - 10, 25)),
                                     cv2.FONT_HERSHEY_SIMPLEX,
                                     0.6,
@@ -1057,10 +1284,6 @@ class VisChecador(QWidget):
                             2
                         )
 
-        # ==============================================
-        # MOSTRAR IMAGEN
-        # ==============================================
-
         self._mostrar_frame_en_interfaz(frame)
 
     # ==================================================
@@ -1104,10 +1327,10 @@ class VisChecador(QWidget):
 
         self.timer.stop()
 
-        # Detener también el temporizador del resultado.
         self.timer_resultado.stop()
 
         self.mostrar_resultado_fallido = False
+        self.esperando_retiro_rostro = False
 
         if self.camara is not None:
 
