@@ -7,6 +7,8 @@ import onnxruntime as ort
 from pathlib import Path
 from datetime import datetime
 
+from Configuracion.ConexionMySQL import obtener_conexion
+
 
 # =====================================================
 # RUTAS
@@ -20,11 +22,6 @@ RUTA_YUNET = RUTA_MODELOS / "yunet.onnx"
 RUTA_AURAFACE = RUTA_MODELOS / "auraface.onnx"
 
 RUTA_ROSTROS = RUTA_PROYECTO / "DatosLocales" / "Rostros"
-
-RUTA_EMBEDDINGS = (
-    RUTA_PROYECTO / "DatosLocales" / "embeddings_rostros.json"
-)
-
 
 # =====================================================
 # CONFIGURACIÓN
@@ -52,6 +49,7 @@ PUNTOS_DESTINO = np.array(
 
 _sesion_auraface = None
 _detector_yunet = None
+_tabla_embeddings_asegurada = False
 
 
 def cargar_modelos():
@@ -225,32 +223,98 @@ def generar_embedding(imagen):
 # =====================================================
 
 def cargar_embeddings_guardados():
+    """Carga los vectores faciales desde MySQL."""
 
-    if not RUTA_EMBEDDINGS.exists():
-        return {}
+    conexion = obtener_conexion()
+    if conexion is None:
+        raise ConnectionError("No fue posible conectar con MySQL.")
+
+    cursor = None
+    try:
+        cursor = conexion.cursor(dictionary=True)
+        asegurar_tabla_embeddings(conexion, cursor)
+        cursor.execute("""
+            SELECT
+                id_maestro,
+                embeddings,
+                embedding_promedio,
+                cantidad_fotografias,
+                modelo,
+                fecha_procesamiento
+            FROM tblEmbeddingsRostros
+        """)
+
+        datos = {}
+        for registro in cursor.fetchall():
+            maestro_id = f"MST-{int(registro['id_maestro']):04d}"
+            embeddings = registro["embeddings"]
+            promedio = registro["embedding_promedio"]
+
+            if isinstance(embeddings, str):
+                embeddings = json.loads(embeddings)
+            if isinstance(promedio, str):
+                promedio = json.loads(promedio)
+
+            fecha = registro["fecha_procesamiento"]
+            datos[maestro_id] = {
+                "embeddings": embeddings,
+                "embedding_promedio": promedio,
+                "cantidad_fotografias": registro["cantidad_fotografias"],
+                "modelo": registro["modelo"],
+                "fecha_procesamiento": (
+                    fecha.strftime("%Y-%m-%d %H:%M:%S")
+                    if hasattr(fecha, "strftime") else str(fecha)
+                ),
+            }
+        return datos
+    finally:
+        if cursor:
+            cursor.close()
+        conexion.close()
+
+
+def asegurar_tabla_embeddings(conexion=None, cursor=None):
+    """Crea la tabla de vectores si aún no existe."""
+
+    global _tabla_embeddings_asegurada
+    if _tabla_embeddings_asegurada:
+        return
+
+    conexion_propia = conexion is None
+    if conexion_propia:
+        conexion = obtener_conexion()
+        if conexion is None:
+            raise ConnectionError("No fue posible conectar con MySQL.")
+
+    cursor_propio = cursor is None
+    if cursor_propio:
+        cursor = conexion.cursor()
 
     try:
-
-        with open(
-            RUTA_EMBEDDINGS,
-            "r",
-            encoding="utf-8"
-        ) as archivo:
-
-            datos = json.load(archivo)
-
-        if not isinstance(datos, dict):
-            raise ValueError(
-                "El archivo de características tiene formato incorrecto."
-            )
-
-        return datos
-
-    except json.JSONDecodeError as error:
-
-        raise ValueError(
-            "El archivo embeddings_rostros.json está dañado."
-        ) from error
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tblEmbeddingsRostros (
+                id_maestro INT NOT NULL PRIMARY KEY,
+                embeddings JSON NOT NULL,
+                embedding_promedio JSON NOT NULL,
+                cantidad_fotografias TINYINT UNSIGNED NOT NULL,
+                dimension_vector SMALLINT UNSIGNED NOT NULL,
+                modelo VARCHAR(64) NOT NULL DEFAULT 'AuraFace',
+                fecha_procesamiento DATETIME NOT NULL,
+                CONSTRAINT FK_tblEmbeddingsRostros_tblMaestros
+                    FOREIGN KEY (id_maestro)
+                    REFERENCES tblMaestros (id_maestro)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+        _tabla_embeddings_asegurada = True
+        if conexion_propia:
+            conexion.commit()
+    finally:
+        if cursor_propio:
+            cursor.close()
+        if conexion_propia:
+            conexion.close()
 
 
 # =====================================================
@@ -258,32 +322,97 @@ def cargar_embeddings_guardados():
 # =====================================================
 
 def guardar_embeddings_guardados(datos):
+    """Guarda o actualiza los vectores de maestros en MySQL."""
 
-    RUTA_EMBEDDINGS.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    if not isinstance(datos, dict):
+        raise ValueError("Los vectores faciales no tienen un formato válido.")
 
-    archivo_temporal = RUTA_EMBEDDINGS.with_suffix(
-        ".tmp"
-    )
+    conexion = obtener_conexion()
+    if conexion is None:
+        raise ConnectionError("No fue posible conectar con MySQL.")
 
-    with open(
-        archivo_temporal,
-        "w",
-        encoding="utf-8"
-    ) as archivo:
+    cursor = None
+    try:
+        cursor = conexion.cursor()
+        asegurar_tabla_embeddings(conexion, cursor)
+        filas = []
 
-        json.dump(
-            datos,
-            archivo,
-            ensure_ascii=False,
-            indent=4
-        )
+        for maestro_id, informacion in datos.items():
+            identificador = str(maestro_id).strip().upper()
+            if not identificador.startswith("MST-") or not identificador[4:].isdigit():
+                raise ValueError(f"ID de maestro no válido: {maestro_id}")
+            id_maestro = int(identificador[4:])
 
-    archivo_temporal.replace(
-        RUTA_EMBEDDINGS
-    )
+            promedio = np.asarray(
+                informacion.get("embedding_promedio"),
+                dtype=np.float32
+            ).reshape(-1)
+            embeddings = np.asarray(
+                informacion.get("embeddings", [promedio.tolist()]),
+                dtype=np.float32
+            )
+
+            if promedio.size == 0 or embeddings.ndim != 2:
+                raise ValueError(
+                    f"Los vectores de {identificador} están incompletos."
+                )
+            if embeddings.shape[1] != promedio.size:
+                raise ValueError(
+                    f"Las dimensiones de los vectores de {identificador} "
+                    "no coinciden."
+                )
+            if not np.isfinite(promedio).all() or not np.isfinite(embeddings).all():
+                raise ValueError(
+                    f"Los vectores de {identificador} contienen valores no válidos."
+                )
+
+            fecha_texto = informacion.get("fecha_procesamiento")
+            if fecha_texto:
+                fecha = datetime.strptime(
+                    str(fecha_texto), "%Y-%m-%d %H:%M:%S"
+                )
+            else:
+                fecha = datetime.now()
+
+            filas.append((
+                id_maestro,
+                json.dumps(embeddings.tolist(), separators=(",", ":")),
+                json.dumps(promedio.tolist(), separators=(",", ":")),
+                int(informacion.get("cantidad_fotografias", len(embeddings))),
+                int(promedio.size),
+                str(informacion.get("modelo", "AuraFace"))[:64],
+                fecha,
+            ))
+
+        if filas:
+            cursor.executemany("""
+                INSERT INTO tblEmbeddingsRostros (
+                    id_maestro,
+                    embeddings,
+                    embedding_promedio,
+                    cantidad_fotografias,
+                    dimension_vector,
+                    modelo,
+                    fecha_procesamiento
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    embeddings = VALUES(embeddings),
+                    embedding_promedio = VALUES(embedding_promedio),
+                    cantidad_fotografias = VALUES(cantidad_fotografias),
+                    dimension_vector = VALUES(dimension_vector),
+                    modelo = VALUES(modelo),
+                    fecha_procesamiento = VALUES(fecha_procesamiento)
+            """, filas)
+
+        conexion.commit()
+    except Exception:
+        conexion.rollback()
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        conexion.close()
 
 
 # =====================================================
@@ -389,20 +518,22 @@ def generar_embeddings_maestro(maestro_id):
 
     promedio = promedio / norma
 
-    # Guardar información del maestro.
-    datos = cargar_embeddings_guardados()
+    # Guardar únicamente este maestro; el UPSERT conserva los demás registros.
+    datos = {
+        maestro_id: {
 
-    datos[maestro_id] = {
+            "embeddings": embeddings,
 
-        "embeddings": embeddings,
+            "embedding_promedio": promedio.tolist(),
 
-        "embedding_promedio": promedio.tolist(),
+            "cantidad_fotografias": len(embeddings),
 
-        "cantidad_fotografias": len(embeddings),
+            "modelo": "AuraFace",
 
-        "fecha_procesamiento": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+            "fecha_procesamiento": datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        }
     }
 
     guardar_embeddings_guardados(datos)
@@ -419,10 +550,7 @@ def generar_embeddings_maestro(maestro_id):
         len(errores)
     )
 
-    print(
-        "Archivo:",
-        RUTA_EMBEDDINGS
-    )
+    print("Almacenamiento: MySQL / tblEmbeddingsRostros")
 
     print("================================\n")
 
@@ -431,5 +559,5 @@ def generar_embeddings_maestro(maestro_id):
         "fotografias_encontradas": len(fotografias),
         "fotografias_procesadas": len(embeddings),
         "errores": errores,
-        "archivo_guardado": str(RUTA_EMBEDDINGS)
+        "almacenamiento": "MySQL / tblEmbeddingsRostros"
     }
