@@ -1,7 +1,7 @@
-
 # ==========================================================
 # VENTANA DE REGISTRO DE CLASE
 # Archivo: Vistas/VisRegistroClase.py
+# Base de datos: MySQL
 # ==========================================================
 
 from PySide6.QtWidgets import (
@@ -116,8 +116,12 @@ class VisRegistroClase(QDialog):
             or self.maestro.get("id", "")
         )
 
+        apellido = self.maestro.get("apellidos", "")
+
+        nombre_completo = f"{nombre} {apellido}".strip()
+
         lbl_maestro = QLabel(
-            f"Maestro: {nombre}"
+            f"Maestro: {nombre_completo}"
         )
 
         lbl_maestro.setStyleSheet("""
@@ -181,12 +185,19 @@ class VisRegistroClase(QDialog):
             )
         )
 
+        fecha_asistencia = (
+            self.fecha_hora_reconocimiento.strftime(
+                "%d/%m/%Y"
+            )
+        )
+
         datos = [
             ("Materia", materia),
             ("Carrera", carrera),
             ("Cuatrimestre", cuatrimestre),
             ("Día", dia),
             ("Horario", f"{inicio} - {fin}"),
+            ("Fecha de asistencia", fecha_asistencia),
             ("Hora de asistencia", hora_asistencia)
         ]
 
@@ -279,6 +290,10 @@ class VisRegistroClase(QDialog):
             QPushButton:hover {
                 background-color: #1677C8;
             }
+
+            QPushButton:disabled {
+                background-color: #94A3B8;
+            }
         """)
 
         self.btn_cancelar.clicked.connect(
@@ -296,7 +311,7 @@ class VisRegistroClase(QDialog):
         principal.addLayout(botones)
 
     # ======================================================
-    # GUARDAR
+    # GUARDAR ASISTENCIA EN MYSQL
     # ======================================================
 
     def guardar(self):
@@ -315,9 +330,11 @@ class VisRegistroClase(QDialog):
 
         self.btn_guardar.setEnabled(False)
 
+        self.btn_cancelar.setEnabled(False)
+
         try:
 
-            registrar_clase_impartida(
+            id_clase = registrar_clase_impartida(
                 maestro=self.maestro,
                 horario=self.horario,
                 fecha_hora_reconocimiento=(
@@ -331,8 +348,11 @@ class VisRegistroClase(QDialog):
             QMessageBox.information(
                 self,
                 "Registro completado",
-                "Los temas y la asistencia se guardaron "
-                "correctamente en Firebase."
+                (
+                    "Los temas y la asistencia se guardaron "
+                    "correctamente en MySQL.\n\n"
+                    f"Folio de asistencia: {id_clase}"
+                )
             )
 
             self.accept()
@@ -346,3 +366,5 @@ class VisRegistroClase(QDialog):
             )
 
             self.btn_guardar.setEnabled(True)
+
+            self.btn_cancelar.setEnabled(True)

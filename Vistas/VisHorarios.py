@@ -2,6 +2,7 @@
 # ==========================================================
 # VISTA DE HORARIOS
 # Archivo: Vistas/VisHorarios.py
+# BASE DE DATOS: MYSQL
 # ==========================================================
 
 from PySide6.QtWidgets import (
@@ -26,16 +27,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTime
 from PySide6.QtGui import QColor
 
-from Servicios.ServicioAlmacenamiento import cargar_maestros
-
-from Servicios.ServicioMaterias import cargar_materias
-
-from Servicios.ServicioHorarios import (
-    cargar_horarios as obtener_horarios,
-    registrar_horario as guardar_horario,
-    actualizar_horario,
-    desactivar_horario
-)
+from Configuracion.ConexionMySQL import obtener_conexion
 
 
 # ==========================================================
@@ -67,12 +59,43 @@ class VisHorarios(QWidget):
         self.horarios = []
         self.horarios_filtrados = []
 
-        self.creando_horario = True
         self.id_seleccionado = None
 
         self.crear_interfaz()
         self.cargar_datos()
         self.cargar_horarios()
+
+    # ======================================================
+    # CONEXIÓN MYSQL
+    # ======================================================
+
+    def obtener_conexion_mysql(self):
+
+        conexion = obtener_conexion()
+
+        if conexion is None:
+            raise ConnectionError(
+                "No fue posible conectar con MySQL."
+            )
+
+        return conexion
+
+    # ======================================================
+    # CONVERTIR ID DE MAESTRO
+    # ======================================================
+
+    def convertir_numero_a_id(self, numero):
+
+        return f"MST-{int(numero):04d}"
+
+    def convertir_id_a_numero(self, identificador):
+
+        identificador = str(identificador).strip()
+
+        if identificador.upper().startswith("MST-"):
+            identificador = identificador[4:]
+
+        return int(identificador)
 
     # ======================================================
     # INTERFAZ PRINCIPAL
@@ -82,10 +105,7 @@ class VisHorarios(QWidget):
 
         principal = QVBoxLayout(self)
 
-        principal.setContentsMargins(
-            25, 22, 25, 22
-        )
-
+        principal.setContentsMargins(25, 22, 25, 22)
         principal.setSpacing(16)
 
         # ==================================================
@@ -191,13 +211,8 @@ class VisHorarios(QWidget):
 
         layout_formulario = QVBoxLayout(marco_formulario)
 
-        layout_formulario.setContentsMargins(
-            18, 15, 18, 15
-        )
-
+        layout_formulario.setContentsMargins(18, 15, 18, 15)
         layout_formulario.setSpacing(13)
-
-        # ENCABEZADO DEL FORMULARIO
 
         encabezado_formulario = QHBoxLayout()
 
@@ -256,20 +271,11 @@ class VisHorarios(QWidget):
         campos.setHorizontalSpacing(14)
         campos.setVerticalSpacing(7)
 
-        # MAESTRO
-
-        etiqueta_maestro = self.crear_etiqueta(
-            "Maestro"
-        )
+        etiqueta_maestro = self.crear_etiqueta("Maestro")
+        etiqueta_materia = self.crear_etiqueta("Materia")
 
         self.combo_maestro = QComboBox()
         self.combo_maestro.setMinimumHeight(40)
-
-        # MATERIA
-
-        etiqueta_materia = self.crear_etiqueta(
-            "Materia"
-        )
 
         self.combo_materia = QComboBox()
         self.combo_materia.setMinimumHeight(40)
@@ -413,10 +419,7 @@ class VisHorarios(QWidget):
 
         layout_tabla = QVBoxLayout(marco_tabla)
 
-        layout_tabla.setContentsMargins(
-            18, 15, 18, 15
-        )
-
+        layout_tabla.setContentsMargins(18, 15, 18, 15)
         layout_tabla.setSpacing(12)
 
         encabezado_tabla = QHBoxLayout()
@@ -541,8 +544,6 @@ class VisHorarios(QWidget):
         )
 
         encabezado_horizontal.setStretchLastSection(True)
-
-        # La materia y el maestro necesitan más espacio.
 
         encabezado_horizontal.setSectionResizeMode(
             1, QHeaderView.Stretch
@@ -683,10 +684,7 @@ class VisHorarios(QWidget):
 
         layout = QVBoxLayout(tarjeta)
 
-        layout.setContentsMargins(
-            16, 11, 16, 11
-        )
-
+        layout.setContentsMargins(16, 11, 16, 11)
         layout.setSpacing(4)
 
         etiqueta = QLabel(titulo)
@@ -718,11 +716,7 @@ class VisHorarios(QWidget):
     # CAMPOS DE INFORMACIÓN
     # ======================================================
 
-    def crear_campo_informacion(
-        self,
-        titulo,
-        valor
-    ):
+    def crear_campo_informacion(self, titulo, valor):
 
         tarjeta = QFrame()
 
@@ -736,10 +730,7 @@ class VisHorarios(QWidget):
 
         layout = QVBoxLayout(tarjeta)
 
-        layout.setContentsMargins(
-            12, 8, 12, 8
-        )
-
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(3)
 
         etiqueta = QLabel(titulo)
@@ -941,43 +932,61 @@ class VisHorarios(QWidget):
         self.actualizar_indicadores()
 
     # ======================================================
-    # CARGAR MAESTROS
+    # CARGAR MAESTROS DESDE MYSQL
     # ======================================================
 
     def cargar_lista_maestros(self):
 
+        conexion = None
+        cursor = None
+
         self.combo_maestro.clear()
+        self.maestros = []
 
         try:
 
-            self.maestros = cargar_maestros() or []
+            conexion = self.obtener_conexion_mysql()
 
-            for maestro in self.maestros:
+            cursor = conexion.cursor(dictionary=True)
 
-                if not isinstance(maestro, dict):
-                    continue
+            cursor.execute("""
+                SELECT
+                    id_maestro,
+                    nombre,
+                    apellido,
+                    estado
+                FROM tblMaestros
+                WHERE estado = 'ACTIVO'
+                ORDER BY apellido ASC, nombre ASC
+            """)
 
-                if maestro.get(
-                    "activo",
-                    maestro.get("Activo", True)
-                ) is False:
-                    continue
+            registros = cursor.fetchall()
 
-                identificador = maestro.get("id", "")
+            for registro in registros:
 
-                nombre = maestro.get("nombre", "")
-                apellidos = maestro.get("apellidos", "")
+                numero = registro["id_maestro"]
+
+                identificador = self.convertir_numero_a_id(numero)
 
                 nombre_completo = (
-                    f"{nombre} {apellidos}".strip()
-                )
+                    f"{registro['nombre']} "
+                    f"{registro['apellido']}"
+                ).strip()
 
-                if not identificador or not nombre_completo:
-                    continue
+                maestro = {
+                    "id": identificador,
+                    "id_maestro": numero,
+                    "nombre": registro["nombre"],
+                    "apellidos": registro["apellido"],
+                    "nombre_completo": nombre_completo,
+                    "activo": True
+                }
+
+                self.maestros.append(maestro)
 
                 self.combo_maestro.addItem(
                     f"{identificador} - {nombre_completo}",
-                    identificador
+                    numero
                 )
 
             if self.combo_maestro.count() == 0:
@@ -992,44 +1001,71 @@ class VisHorarios(QWidget):
             QMessageBox.critical(
                 self,
                 "Error al cargar maestros",
-                str(error)
+                f"No fue posible consultar los maestros en MySQL:\n\n{error}"
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # CARGAR MATERIAS
+    # CARGAR MATERIAS DESDE MYSQL
     # ======================================================
 
     def cargar_lista_materias(self):
 
+        conexion = None
+        cursor = None
+
         self.combo_materia.clear()
+        self.materias = []
 
         try:
 
-            self.materias = cargar_materias(
-                solo_activas=True
-            ) or []
+            conexion = self.obtener_conexion_mysql()
 
-            for materia in self.materias:
+            cursor = conexion.cursor(dictionary=True)
 
-                if not isinstance(materia, dict):
-                    continue
+            cursor.execute("""
+                SELECT
+                    id_materia,
+                    nombre,
+                    carrera,
+                    cuatrimestre,
+                    estado
+                FROM tblMaterias
+                WHERE estado = 'ACTIVA'
+                ORDER BY carrera, cuatrimestre, nombre
+            """)
 
-                identificador = materia.get("id", "")
-                nombre = materia.get("nombre", "")
+            registros = cursor.fetchall()
 
-                carrera = materia.get("carrera", "")
-                cuatrimestre = materia.get("cuatrimestre", "")
+            for registro in registros:
 
-                if not identificador or not nombre:
-                    continue
+                materia = {
+                    "id": str(registro["id_materia"]),
+                    "id_materia": registro["id_materia"],
+                    "nombre": registro["nombre"],
+                    "carrera": registro["carrera"],
+                    "cuatrimestre": registro["cuatrimestre"],
+                    "activo": True
+                }
+
+                self.materias.append(materia)
 
                 texto = (
-                    f"{nombre} | {carrera} | {cuatrimestre}"
+                    f"{materia['nombre']} | "
+                    f"{materia['carrera']} | "
+                    f"{materia['cuatrimestre']}"
                 )
 
                 self.combo_materia.addItem(
                     texto,
-                    identificador
+                    registro["id_materia"]
                 )
 
             if self.combo_materia.count() == 0:
@@ -1046,8 +1082,16 @@ class VisHorarios(QWidget):
             QMessageBox.critical(
                 self,
                 "Error al cargar materias",
-                f"No fue posible consultar las materias:\n\n{error}"
+                f"No fue posible consultar las materias en MySQL:\n\n{error}"
             )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
 
     # ======================================================
     # ACTUALIZAR INDICADORES
@@ -1060,15 +1104,11 @@ class VisHorarios(QWidget):
         )
 
         self.lbl_total_maestros.setText(
-            str(self.combo_maestro.count())
-            if self.combo_maestro.itemData(0) is not None
-            else "0"
+            str(len(self.maestros))
         )
 
         self.lbl_total_materias.setText(
-            str(self.combo_materia.count())
-            if self.combo_materia.itemData(0) is not None
-            else "0"
+            str(len(self.materias))
         )
 
     # ======================================================
@@ -1082,7 +1122,7 @@ class VisHorarios(QWidget):
         materia = next(
             (
                 m for m in self.materias
-                if m.get("id") == identificador
+                if m.get("id_materia") == identificador
             ),
             None
         )
@@ -1124,6 +1164,90 @@ class VisHorarios(QWidget):
         return True
 
     # ======================================================
+    # VALIDAR EMPALMES
+    # ======================================================
+
+    def validar_empalme(
+        self,
+        id_maestro,
+        dia,
+        hora_inicio,
+        hora_fin,
+        id_excluir=None
+    ):
+
+        conexion = None
+        cursor = None
+
+        try:
+
+            conexion = self.obtener_conexion_mysql()
+
+            cursor = conexion.cursor(dictionary=True)
+
+            consulta = """
+                SELECT
+                    id_horario,
+                    hora_inicio,
+                    hora_fin
+                FROM tblHorarios
+                WHERE id_maestro = %s
+                AND dia = %s
+                AND estado = 'ACTIVO'
+                AND hora_inicio < %s
+                AND hora_fin > %s
+            """
+
+            parametros = [
+                id_maestro,
+                dia,
+                hora_fin,
+                hora_inicio
+            ]
+
+            if id_excluir is not None:
+
+                consulta += """
+                    AND id_horario <> %s
+                """
+
+                parametros.append(id_excluir)
+
+            cursor.execute(
+                consulta,
+                tuple(parametros)
+            )
+
+            empalme = cursor.fetchone()
+
+            if empalme:
+
+                return (
+                    False,
+                    "El maestro ya tiene otro horario registrado "
+                    "que se empalma con este horario.\n\n"
+                    f"Horario existente: "
+                    f"{str(empalme['hora_inicio'])[:5]} - "
+                    f"{str(empalme['hora_fin'])[:5]}"
+                )
+
+            return True, ""
+
+        except Exception as error:
+
+            return False, (
+                f"No fue posible validar los horarios:\n\n{error}"
+            )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
+    # ======================================================
     # REGISTRAR HORARIO
     # ======================================================
 
@@ -1155,23 +1279,67 @@ class VisHorarios(QWidget):
         if not self.validar_horas():
             return
 
-        inicio = self.hora_inicio.time()
-        fin = self.hora_fin.time()
+        inicio = self.hora_inicio.time().toString("HH:mm:ss")
+        fin = self.hora_fin.time().toString("HH:mm:ss")
+
+        dia = self.combo_dia.currentText()
+
+        valido, mensaje = self.validar_empalme(
+            id_maestro,
+            dia,
+            inicio,
+            fin
+        )
+
+        if not valido:
+
+            QMessageBox.warning(
+                self,
+                "Conflicto de horario",
+                mensaje
+            )
+
+            return
+
+        conexion = None
+        cursor = None
 
         try:
 
-            guardar_horario(
-                id_materia,
+            conexion = self.obtener_conexion_mysql()
+
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                INSERT INTO tblHorarios (
+                    id_maestro,
+                    id_materia,
+                    dia,
+                    hora_inicio,
+                    hora_fin,
+                    turno,
+                    estado
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
                 id_maestro,
-                self.combo_dia.currentText(),
-                inicio.toString("HH:mm"),
-                fin.toString("HH:mm")
-            )
+                id_materia,
+                dia,
+                inicio,
+                fin,
+                "VESPERTINO",
+                "ACTIVO"
+            ))
+
+            identificador = cursor.lastrowid
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Registro correcto",
-                "El horario se registró correctamente."
+                "El horario se registró correctamente en MySQL.\n\n"
+                f"ID del horario: {identificador}"
             )
 
             self.limpiar_formulario()
@@ -1179,40 +1347,150 @@ class VisHorarios(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.critical(
                 self,
                 "Error al registrar",
-                str(error)
+                f"No fue posible registrar el horario:\n\n{error}"
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # CARGAR HORARIOS
+    # CARGAR HORARIOS DESDE MYSQL
     # ======================================================
 
     def cargar_horarios(self):
 
+        conexion = None
+        cursor = None
+
         try:
 
-            self.horarios = obtener_horarios(
-                solo_activos=True
-            ) or []
+            conexion = self.obtener_conexion_mysql()
 
-            self.mostrar_horarios(
-                self.horarios
-            )
+            cursor = conexion.cursor(dictionary=True)
+
+            cursor.execute("""
+                SELECT
+                    h.id_horario,
+                    h.id_maestro,
+                    h.id_materia,
+                    h.dia,
+                    h.hora_inicio,
+                    h.hora_fin,
+                    h.turno,
+                    h.estado,
+
+                    m.nombre AS nombre_maestro,
+                    m.apellido AS apellido_maestro,
+
+                    ma.nombre AS nombre_materia,
+                    ma.carrera,
+                    ma.cuatrimestre
+
+                FROM tblHorarios h
+
+                INNER JOIN tblMaestros m
+                    ON h.id_maestro = m.id_maestro
+
+                INNER JOIN tblMaterias ma
+                    ON h.id_materia = ma.id_materia
+
+                WHERE h.estado = 'ACTIVO'
+
+                ORDER BY
+                    FIELD(
+                        h.dia,
+                        'LUNES',
+                        'MARTES',
+                        'MIÉRCOLES',
+                        'JUEVES',
+                        'VIERNES',
+                        'SÁBADO'
+                    ),
+                    h.hora_inicio
+            """)
+
+            registros = cursor.fetchall()
+
+            self.horarios = []
+
+            for registro in registros:
+
+                nombre_maestro = (
+                    f"{registro['nombre_maestro']} "
+                    f"{registro['apellido_maestro']}"
+                ).strip()
+
+                horario = {
+                    "id": str(registro["id_horario"]),
+                    "id_maestro": registro["id_maestro"],
+                    "id_materia": registro["id_materia"],
+
+                    "maestro": nombre_maestro,
+
+                    "id_maestro_texto": self.convertir_numero_a_id(
+                        registro["id_maestro"]
+                    ),
+
+                    "materia": registro["nombre_materia"],
+                    "dia": registro["dia"],
+
+                    "hora_inicio": str(
+                        registro["hora_inicio"]
+                    )[:5],
+
+                    "hora_fin": str(
+                        registro["hora_fin"]
+                    )[:5],
+
+                    "turno": registro["turno"],
+                    "carrera": registro["carrera"],
+                    "cuatrimestre": registro["cuatrimestre"],
+                    "estado": registro["estado"]
+                }
+
+                self.horarios.append(horario)
+
+            self.horarios_filtrados = self.horarios.copy()
+
+            # Volver a mostrar los registros obtenidos de MySQL
+            self.mostrar_horarios(self.horarios)
 
             self.actualizar_indicadores()
+
+            self.id_seleccionado = None
+
+            self.actualizar_estado_botones()
 
         except Exception as error:
 
             QMessageBox.critical(
                 self,
                 "Error al cargar horarios",
-                str(error)
+                f"No fue posible consultar los horarios en MySQL:\n\n{error}"
             )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
 
     # ======================================================
     # MOSTRAR HORARIOS
+    # CORREGIDO: LIMPIAR COMBINACIONES ANTERIORES
     # ======================================================
 
     def mostrar_horarios(self, horarios):
@@ -1221,48 +1499,55 @@ class VisHorarios(QWidget):
 
         try:
 
+            # Eliminar combinaciones de columnas anteriores.
+            # Esto evita que el mensaje de tabla vacía
+            # impida visualizar los registros nuevos.
+            self.tabla.clearSpans()
+
             self.tabla.clearContents()
+
             self.tabla.setRowCount(len(horarios))
 
-            for fila, horario in enumerate(horarios):
+            if horarios:
 
-                valores = [
-                    horario.get("id", ""),
-                    horario.get("maestro", ""),
-                    horario.get("materia", ""),
-                    horario.get("dia", ""),
-                    horario.get("hora_inicio", ""),
-                    horario.get("hora_fin", ""),
-                    horario.get("carrera", ""),
-                    horario.get("cuatrimestre", "")
-                ]
+                for fila, horario in enumerate(horarios):
 
-                for columna, valor in enumerate(valores):
+                    valores = [
+                        horario.get("id", ""),
+                        horario.get("maestro", ""),
+                        horario.get("materia", ""),
+                        horario.get("dia", ""),
+                        horario.get("hora_inicio", ""),
+                        horario.get("hora_fin", ""),
+                        horario.get("carrera", ""),
+                        horario.get("cuatrimestre", "")
+                    ]
 
-                    elemento = QTableWidgetItem(
-                        str(valor)
-                    )
+                    for columna, valor in enumerate(valores):
 
-                    elemento.setTextAlignment(
-                        Qt.AlignCenter
-                    )
+                        elemento = QTableWidgetItem(str(valor))
 
-                    elemento.setForeground(
-                        QColor("#334155")
-                    )
-
-                    if columna == 0:
-                        elemento.setForeground(
-                            QColor("#003B73")
+                        elemento.setTextAlignment(
+                            Qt.AlignCenter
                         )
 
-                    self.tabla.setItem(
-                        fila,
-                        columna,
-                        elemento
-                    )
+                        elemento.setForeground(
+                            QColor("#334155")
+                        )
 
-            if not horarios:
+                        if columna == 0:
+
+                            elemento.setForeground(
+                                QColor("#003B73")
+                            )
+
+                        self.tabla.setItem(
+                            fila,
+                            columna,
+                            elemento
+                        )
+
+            else:
 
                 self.tabla.setRowCount(1)
 
@@ -1279,6 +1564,7 @@ class VisHorarios(QWidget):
                 )
 
                 self.tabla.setItem(0, 0, elemento)
+
                 self.tabla.setSpan(0, 0, 1, 8)
 
             self.lbl_resultados.setText(
@@ -1330,7 +1616,6 @@ class VisHorarios(QWidget):
         self.mostrar_horarios(filtrados)
 
         self.id_seleccionado = None
-        self.materia_seleccionada = None
 
         self.tabla.clearSelection()
 
@@ -1353,6 +1638,7 @@ class VisHorarios(QWidget):
         if not filas:
 
             self.id_seleccionado = None
+
             self.actualizar_estado_botones()
 
             return
@@ -1368,7 +1654,7 @@ class VisHorarios(QWidget):
 
         horario = next(
             (
-                h for h in self.horarios
+                h for h in self.horarios_filtrados
                 if str(h.get("id", "")) == self.id_seleccionado
             ),
             None
@@ -1384,6 +1670,7 @@ class VisHorarios(QWidget):
         )
 
         if indice_maestro >= 0:
+
             self.combo_maestro.setCurrentIndex(
                 indice_maestro
             )
@@ -1395,6 +1682,7 @@ class VisHorarios(QWidget):
         )
 
         if indice_materia >= 0:
+
             self.combo_materia.setCurrentIndex(
                 indice_materia
             )
@@ -1406,6 +1694,7 @@ class VisHorarios(QWidget):
         )
 
         if indice_dia >= 0:
+
             self.combo_dia.setCurrentIndex(
                 indice_dia
             )
@@ -1499,24 +1788,80 @@ class VisHorarios(QWidget):
         if respuesta != QMessageBox.Yes:
             return
 
-        inicio = self.hora_inicio.time()
-        fin = self.hora_fin.time()
+        inicio = self.hora_inicio.time().toString("HH:mm:ss")
+        fin = self.hora_fin.time().toString("HH:mm:ss")
+
+        dia = self.combo_dia.currentText()
+
+        valido, mensaje = self.validar_empalme(
+            id_maestro,
+            dia,
+            inicio,
+            fin,
+            int(self.id_seleccionado)
+        )
+
+        if not valido:
+
+            QMessageBox.warning(
+                self,
+                "Conflicto de horario",
+                mensaje
+            )
+
+            return
+
+        conexion = None
+        cursor = None
 
         try:
 
-            actualizar_horario(
-                self.id_seleccionado,
-                id_materia,
+            conexion = self.obtener_conexion_mysql()
+
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                UPDATE tblHorarios
+                SET
+                    id_maestro = %s,
+                    id_materia = %s,
+                    dia = %s,
+                    hora_inicio = %s,
+                    hora_fin = %s
+                WHERE id_horario = %s
+                AND estado = 'ACTIVO'
+            """, (
                 id_maestro,
-                self.combo_dia.currentText(),
-                inicio.toString("HH:mm"),
-                fin.toString("HH:mm")
-            )
+                id_materia,
+                dia,
+                inicio,
+                fin,
+                int(self.id_seleccionado)
+            ))
+
+            if cursor.rowcount == 0:
+
+                cursor.execute("""
+                    SELECT id_horario
+                    FROM tblHorarios
+                    WHERE id_horario = %s
+                    AND estado = 'ACTIVO'
+                """, (
+                    int(self.id_seleccionado),
+                ))
+
+                if not cursor.fetchone():
+
+                    raise ValueError(
+                        "No se encontró el horario seleccionado."
+                    )
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Actualización correcta",
-                "El horario se modificó correctamente."
+                "El horario se modificó correctamente en MySQL."
             )
 
             self.limpiar_formulario()
@@ -1524,11 +1869,22 @@ class VisHorarios(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.critical(
                 self,
                 "Error al modificar",
-                str(error)
+                f"No fue posible modificar el horario:\n\n{error}"
             )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
 
     # ======================================================
     # DESACTIVAR HORARIO
@@ -1550,7 +1906,8 @@ class VisHorarios(QWidget):
             self,
             "Confirmar desactivación",
             "¿Deseas desactivar este horario?\n\n"
-            "El registro dejará de aparecer entre los horarios activos.",
+            "El registro dejará de aparecer entre los horarios activos, "
+            "pero se conservará en MySQL para proteger el historial.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -1558,16 +1915,36 @@ class VisHorarios(QWidget):
         if respuesta != QMessageBox.Yes:
             return
 
+        conexion = None
+        cursor = None
+
         try:
 
-            desactivar_horario(
-                self.id_seleccionado
-            )
+            conexion = self.obtener_conexion_mysql()
+
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                UPDATE tblHorarios
+                SET estado = 'INACTIVO'
+                WHERE id_horario = %s
+                AND estado = 'ACTIVO'
+            """, (
+                int(self.id_seleccionado),
+            ))
+
+            if cursor.rowcount == 0:
+
+                raise ValueError(
+                    "No se encontró un horario activo con ese identificador."
+                )
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Horario desactivado",
-                "El horario se desactivó correctamente."
+                "El horario se desactivó correctamente en MySQL."
             )
 
             self.limpiar_formulario()
@@ -1575,11 +1952,22 @@ class VisHorarios(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.critical(
                 self,
-                "Error",
-                str(error)
+                "Error al desactivar",
+                f"No fue posible desactivar el horario:\n\n{error}"
             )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
 
     # ======================================================
     # ACTUALIZAR LISTAS
@@ -1618,6 +2006,7 @@ class VisHorarios(QWidget):
             QTime(19, 0)
         )
 
+        self.actualizar_informacion_materia()
         self.actualizar_estado_botones()
 
         self.lbl_estado.setText(

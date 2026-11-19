@@ -2,7 +2,7 @@
 # ==========================================================
 # ARKOS CHECADOR
 # Archivo: Vistas/VisInicio.py
-# Panel adaptable a diferentes resoluciones
+# Panel principal y navegación del sistema
 # ==========================================================
 
 from datetime import datetime
@@ -34,6 +34,11 @@ from Vistas.VisNuevoMaestro import VisNuevoMaestro
 from Vistas.VisEditarMaestro import VisEditarMaestro
 from Vistas.VisHorarios import VisHorarios
 from Vistas.VisMaterias import VisMaterias
+from Vistas.VisAsistencias import VisAsistencias
+from Vistas.VisReportes import VisReportes
+from Vistas.VisRetardos import VisRetardos
+from Vistas.VisFaltas import VisFaltas
+from Vistas.VisConfiguracion import VisConfiguracion
 
 
 # ==========================================================
@@ -67,6 +72,8 @@ class VisInicio(QWidget):
 
         self.setObjectName("VisInicio")
 
+        self.setMinimumSize(850, 600)
+
         self.setStyleSheet("""
             QWidget#VisInicio {
                 background-color: #F1F5F9;
@@ -82,6 +89,8 @@ class VisInicio(QWidget):
         self.indicadores = {}
         self.tarjetas_indicadores = []
 
+        self.botones_menu = {}
+
         self.crear_interfaz()
 
         self.actualizar_fecha_hora_inicio()
@@ -93,6 +102,12 @@ class VisInicio(QWidget):
         )
         self.timer_reloj.start(1000)
 
+        self.timer_supervision = QTimer(self)
+        self.timer_supervision.timeout.connect(
+            self.actualizar_supervision
+        )
+        self.timer_supervision.start(60000)
+
     # ======================================================
     # ADAPTACIÓN AL CAMBIO DE TAMAÑO
     # ======================================================
@@ -103,18 +118,14 @@ class VisInicio(QWidget):
 
         ancho = self.width()
 
-        # Menú lateral adaptable
-        if ancho < 850:
-            self.menu_lateral.setFixedWidth(180)
-        elif ancho < 1100:
-            self.menu_lateral.setFixedWidth(205)
+        if ancho < 1000:
+            self.menu_lateral.setFixedWidth(190)
+        elif ancho < 1250:
+            self.menu_lateral.setFixedWidth(215)
         else:
             self.menu_lateral.setFixedWidth(245)
 
-        # Ajustar indicadores
         self.actualizar_distribucion_indicadores()
-
-        # Ajustar encabezado y banner
         self.ajustar_elementos_responsivos(ancho)
 
     # ======================================================
@@ -128,12 +139,8 @@ class VisInicio(QWidget):
 
         ancho = self.scroll.viewport().width()
 
-        if ancho < 650:
-            columnas = 1
-        else:
-            columnas = 2
+        columnas = 1 if ancho < 650 else 2
 
-        # Eliminar posiciones anteriores
         while self.grid_indicadores.count():
 
             elemento = self.grid_indicadores.takeAt(0)
@@ -141,7 +148,6 @@ class VisInicio(QWidget):
             if elemento.widget():
                 elemento.widget().setParent(None)
 
-        # Distribuir tarjetas
         for indice, tarjeta in enumerate(
             self.tarjetas_indicadores
         ):
@@ -156,13 +162,14 @@ class VisInicio(QWidget):
             )
 
         for columna in range(2):
+
             self.grid_indicadores.setColumnStretch(
                 columna,
                 1 if columna < columnas else 0
             )
 
     # ======================================================
-    # AJUSTES RESPONSIVOS DE ELEMENTOS
+    # AJUSTES RESPONSIVOS
     # ======================================================
 
     def ajustar_elementos_responsivos(self, ancho):
@@ -172,18 +179,51 @@ class VisInicio(QWidget):
 
         if ancho < 750:
 
-            self.tarjeta_reloj.setMinimumWidth(180)
-            self.tarjeta_reloj.setMaximumWidth(210)
+            self.tarjeta_reloj.setMinimumWidth(160)
+            self.tarjeta_reloj.setMaximumWidth(195)
 
             self.lbl_hora.setStyleSheet("""
                 color: #003B73;
-                font-size: 19px;
+                font-size: 18px;
                 font-weight: bold;
                 background: transparent;
                 border: none;
             """)
 
-            self.boton_checador.setMinimumWidth(145)
+            self.boton_checador.setMinimumWidth(135)
+
+            self.layout_contenido.setContentsMargins(
+                15, 15, 15, 15
+            )
+
+            self.layout_contenido.setSpacing(14)
+
+            self.banner.setMinimumHeight(155)
+            self.banner.setMaximumHeight(185)
+
+        elif ancho < 1100:
+
+            self.tarjeta_reloj.setMinimumWidth(205)
+            self.tarjeta_reloj.setMaximumWidth(230)
+
+            self.lbl_hora.setStyleSheet("""
+                color: #003B73;
+                font-size: 21px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            """)
+
+            self.boton_checador.setMinimumWidth(155)
+
+            self.layout_contenido.setContentsMargins(
+                22, 20, 22, 18
+            )
+
+            self.layout_contenido.setSpacing(17)
+
+            self.banner.setMinimumHeight(145)
+            self.banner.setMaximumHeight(165)
 
         else:
 
@@ -200,31 +240,6 @@ class VisInicio(QWidget):
 
             self.boton_checador.setMinimumWidth(175)
 
-        # En pantallas pequeñas, el contenido se compacta
-        if ancho < 650:
-
-            self.layout_contenido.setContentsMargins(
-                12, 15, 12, 15
-            )
-
-            self.layout_contenido.setSpacing(14)
-
-            self.banner.setMinimumHeight(165)
-            self.banner.setMaximumHeight(190)
-
-        elif ancho < 1000:
-
-            self.layout_contenido.setContentsMargins(
-                20, 20, 20, 18
-            )
-
-            self.layout_contenido.setSpacing(16)
-
-            self.banner.setMinimumHeight(140)
-            self.banner.setMaximumHeight(160)
-
-        else:
-
             self.layout_contenido.setContentsMargins(
                 30, 25, 30, 20
             )
@@ -233,6 +248,8 @@ class VisInicio(QWidget):
 
             self.banner.setMinimumHeight(135)
             self.banner.setMaximumHeight(155)
+
+        self.actualizar_distribucion_indicadores()
 
     # ======================================================
     # INTERFAZ PRINCIPAL
@@ -253,27 +270,34 @@ class VisInicio(QWidget):
         self.menu_lateral.setFixedWidth(245)
 
         self.menu_lateral.setStyleSheet("""
-            QFrame {
+            QFrame#MenuLateral {
                 background-color: #001F3F;
                 border: none;
             }
         """)
 
+        self.menu_lateral.setObjectName("MenuLateral")
+
         layout_menu = QVBoxLayout(self.menu_lateral)
 
-        layout_menu.setContentsMargins(12, 22, 12, 18)
+        layout_menu.setContentsMargins(
+            12, 20, 12, 16
+        )
+
         layout_menu.setSpacing(7)
+
+        # LOGOTIPO
 
         logo = QLabel("ARKOS")
         logo.setAlignment(Qt.AlignCenter)
 
         logo.setStyleSheet("""
             color: #FFFFFF;
-            font-size: 27px;
+            font-size: 28px;
             font-weight: bold;
             letter-spacing: 3px;
             background: transparent;
-            padding: 12px;
+            padding: 10px;
         """)
 
         subtitulo = QLabel("CHECADOR DOCENTE")
@@ -284,11 +308,72 @@ class VisInicio(QWidget):
             font-size: 10px;
             font-weight: bold;
             background: transparent;
-            padding-bottom: 22px;
+            padding-bottom: 18px;
         """)
 
         layout_menu.addWidget(logo)
         layout_menu.addWidget(subtitulo)
+
+        # ==================================================
+        # ÁREA DESLIZABLE DEL MENÚ
+        # ==================================================
+
+        self.scroll_menu = QScrollArea()
+
+        self.scroll_menu.setWidgetResizable(True)
+        self.scroll_menu.setFrameShape(QFrame.NoFrame)
+
+        self.scroll_menu.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+
+        self.scroll_menu.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+
+        self.scroll_menu.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+
+            QScrollBar:vertical {
+                background: #002B50;
+                width: 5px;
+                border: none;
+            }
+
+            QScrollBar::handle:vertical {
+                background: #64748B;
+                border-radius: 2px;
+                min-height: 25px;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
+        contenido_menu = QWidget()
+
+        contenido_menu.setStyleSheet("""
+            QWidget {
+                background: transparent;
+            }
+        """)
+
+        self.layout_opciones = QVBoxLayout(contenido_menu)
+
+        self.layout_opciones.setContentsMargins(
+            0, 0, 0, 0
+        )
+
+        self.layout_opciones.setSpacing(6)
+
+        self.scroll_menu.setWidget(contenido_menu)
+
+        layout_menu.addWidget(self.scroll_menu, 1)
 
         # ==================================================
         # CONTENEDOR DE PÁGINAS
@@ -320,7 +405,9 @@ class VisInicio(QWidget):
         self.pagina_checador = VisChecador()
 
         self.indices["Checador facial"] = (
-            self.paginas.addWidget(self.pagina_checador)
+            self.paginas.addWidget(
+                self.pagina_checador
+            )
         )
 
         # ==================================================
@@ -340,7 +427,9 @@ class VisInicio(QWidget):
         self.pagina_nuevo_maestro = VisNuevoMaestro()
 
         self.indices["Nuevo maestro"] = (
-            self.paginas.addWidget(self.pagina_nuevo_maestro)
+            self.paginas.addWidget(
+                self.pagina_nuevo_maestro
+            )
         )
 
         # ==================================================
@@ -364,7 +453,57 @@ class VisInicio(QWidget):
         )
 
         # ==================================================
-        # CONEXIONES
+        # ASISTENCIAS
+        # ==================================================
+
+        self.pagina_asistencias = VisAsistencias()
+
+        self.indices["Asistencias"] = (
+            self.paginas.addWidget(
+                self.pagina_asistencias
+            )
+        )
+
+        # ==================================================
+        # REPORTES
+        # ==================================================
+
+        self.pagina_reportes = VisReportes()
+        self.indices["Reportes"] = self.paginas.addWidget(
+            self.pagina_reportes
+        )
+
+        # ==================================================
+        # RETARDOS Y FALTAS
+        # ==================================================
+
+        self.pagina_retardos = VisRetardos()
+        self.indices["Retardos"] = self.paginas.addWidget(
+            self.pagina_retardos
+        )
+
+        self.pagina_faltas = VisFaltas()
+        self.indices["Faltas"] = self.paginas.addWidget(
+            self.pagina_faltas
+        )
+
+        # ==================================================
+        # CONFIGURACIÓN
+        # ==================================================
+
+        self.pagina_configuracion = VisConfiguracion()
+        self.pagina_configuracion.volver_solicitado.connect(
+            self.volver_al_panel_principal
+        )
+
+        self.indices["Configuración"] = (
+            self.paginas.addWidget(
+                self.pagina_configuracion
+            )
+        )
+
+        # ==================================================
+        # CONEXIONES DE MAESTROS
         # ==================================================
 
         self.pagina_maestros.nuevo_maestro_solicitado.connect(
@@ -404,14 +543,12 @@ class VisInicio(QWidget):
             "Configuración"
         ]
 
-        self.botones_menu = {}
-
         for opcion in opciones:
 
             boton = QPushButton(opcion)
 
             boton.setCursor(Qt.PointingHandCursor)
-            boton.setMinimumHeight(42)
+            boton.setMinimumHeight(43)
             boton.setCheckable(True)
 
             boton.setStyleSheet("""
@@ -421,7 +558,7 @@ class VisInicio(QWidget):
                     border: none;
                     border-radius: 7px;
                     text-align: left;
-                    padding-left: 13px;
+                    padding-left: 14px;
                     font-size: 12px;
                 }
 
@@ -435,7 +572,7 @@ class VisInicio(QWidget):
                     color: #FFFFFF;
                     font-weight: bold;
                     border-left: 4px solid #FF851B;
-                    padding-left: 9px;
+                    padding-left: 10px;
                 }
             """)
 
@@ -444,11 +581,11 @@ class VisInicio(QWidget):
                 self.cambiar_seccion(nombre)
             )
 
-            layout_menu.addWidget(boton)
+            self.layout_opciones.addWidget(boton)
 
             self.botones_menu[opcion] = boton
 
-        layout_menu.addStretch()
+        self.layout_opciones.addStretch()
 
         # ==================================================
         # CERRAR SESIÓN
@@ -456,7 +593,7 @@ class VisInicio(QWidget):
 
         cerrar = QPushButton("Cerrar sesión")
 
-        cerrar.setMinimumHeight(42)
+        cerrar.setMinimumHeight(43)
         cerrar.setCursor(Qt.PointingHandCursor)
 
         cerrar.setStyleSheet("""
@@ -472,6 +609,10 @@ class VisInicio(QWidget):
             QPushButton:hover {
                 background-color: #DC2626;
             }
+
+            QPushButton:pressed {
+                background-color: #7F1D1D;
+            }
         """)
 
         cerrar.clicked.connect(
@@ -479,6 +620,10 @@ class VisInicio(QWidget):
         )
 
         layout_menu.addWidget(cerrar)
+
+        # ==================================================
+        # AGREGAR ELEMENTOS PRINCIPALES
+        # ==================================================
 
         principal.addWidget(self.menu_lateral)
         principal.addWidget(self.paginas, 1)
@@ -506,7 +651,10 @@ class VisInicio(QWidget):
 
         layout_principal = QVBoxLayout(pagina)
 
-        layout_principal.setContentsMargins(0, 0, 0, 0)
+        layout_principal.setContentsMargins(
+            0, 0, 0, 0
+        )
+
         layout_principal.setSpacing(0)
 
         # ==================================================
@@ -516,7 +664,6 @@ class VisInicio(QWidget):
         self.scroll = QScrollArea()
 
         self.scroll.setWidgetResizable(True)
-
         self.scroll.setFrameShape(QFrame.NoFrame)
 
         self.scroll.setHorizontalScrollBarPolicy(
@@ -741,7 +888,10 @@ class VisInicio(QWidget):
         )
 
         self.boton_checador.setMinimumHeight(43)
-        self.boton_checador.setCursor(Qt.PointingHandCursor)
+
+        self.boton_checador.setCursor(
+            Qt.PointingHandCursor
+        )
 
         self.boton_checador.setSizePolicy(
             QSizePolicy.Preferred,
@@ -769,7 +919,9 @@ class VisInicio(QWidget):
         """)
 
         self.boton_checador.clicked.connect(
-            lambda: self.cambiar_seccion("Checador facial")
+            lambda: self.cambiar_seccion(
+                "Checador facial"
+            )
         )
 
         layout_banner.addWidget(
@@ -800,7 +952,6 @@ class VisInicio(QWidget):
         )
 
         self.grid_indicadores = QGridLayout()
-
         self.grid_indicadores.setSpacing(14)
 
         tarjetas = [
@@ -958,7 +1109,6 @@ class VisInicio(QWidget):
         )
 
         self.lbl_actividad.setWordWrap(True)
-
         self.lbl_actividad.setMinimumHeight(110)
 
         self.lbl_actividad.setStyleSheet("""
@@ -997,15 +1147,6 @@ class VisInicio(QWidget):
 
         self.layout_contenido.addStretch()
 
-        self.scroll.setWidget(contenido) if hasattr(
-            self, "scroll"
-        ) else None
-
-        self.scroll = self.scroll if hasattr(
-            self, "scroll"
-        ) else None
-
-        # El scroll se asigna al layout al final
         self.scroll.setWidget(contenido)
 
         layout_principal.addWidget(self.scroll)
@@ -1050,10 +1191,13 @@ class VisInicio(QWidget):
 
     def actualizar_supervision(self):
 
+        # ==================================================
         # MAESTROS
+        # ==================================================
+
         try:
 
-            maestros = cargar_maestros()
+            maestros = cargar_maestros() or []
 
             self.indicadores["maestros"].setText(
                 str(len(maestros))
@@ -1061,16 +1205,22 @@ class VisInicio(QWidget):
 
         except Exception as error:
 
-            print("ERROR AL CONTAR MAESTROS:", error)
+            print(
+                "ERROR AL CONTAR MAESTROS:",
+                error
+            )
 
             self.indicadores["maestros"].setText("--")
 
+        # ==================================================
         # MATERIAS
+        # ==================================================
+
         try:
 
             materias = cargar_materias(
                 solo_activas=True
-            )
+            ) or []
 
             self.indicadores["materias"].setText(
                 str(len(materias))
@@ -1078,11 +1228,17 @@ class VisInicio(QWidget):
 
         except Exception as error:
 
-            print("ERROR AL CONTAR MATERIAS:", error)
+            print(
+                "ERROR AL CONTAR MATERIAS:",
+                error
+            )
 
             self.indicadores["materias"].setText("--")
 
+        # ==================================================
         # CLASES IMPARTIDAS
+        # ==================================================
+
         try:
 
             documentos = db.collection(
@@ -1094,6 +1250,7 @@ class VisInicio(QWidget):
             for documento in documentos:
 
                 datos = documento.to_dict() or {}
+
                 datos["id"] = documento.id
 
                 clases.append(datos)
@@ -1106,20 +1263,31 @@ class VisInicio(QWidget):
                 "%Y-%m-%d"
             )
 
-            asistencias_hoy = [
-                clase
-                for clase in clases
-                if clase.get("fecha") == fecha_hoy
-            ]
+            asistencias_hoy = []
+
+            for clase in clases:
+
+                fecha = clase.get("fecha", "")
+
+                if hasattr(fecha, "strftime"):
+                    fecha = fecha.strftime("%Y-%m-%d")
+
+                elif isinstance(fecha, str):
+                    fecha = fecha[:10]
+
+                if fecha == fecha_hoy:
+                    asistencias_hoy.append(clase)
 
             self.indicadores["asistencias"].setText(
                 str(len(asistencias_hoy))
             )
 
+            # ORDENAR ACTIVIDAD RECIENTE
+
             clases.sort(
                 key=lambda clase: (
-                    clase.get("fecha", ""),
-                    clase.get("hora_asistencia", "")
+                    str(clase.get("fecha", "")),
+                    str(clase.get("hora_asistencia", ""))
                 ),
                 reverse=True
             )
@@ -1152,23 +1320,36 @@ class VisInicio(QWidget):
                         "Sin hora"
                     )
 
+                    if hasattr(fecha, "strftime"):
+                        fecha = fecha.strftime("%d/%m/%Y")
+
+                    if hasattr(hora, "strftime"):
+                        hora = hora.strftime("%H:%M")
+
                     carrera = clase.get("carrera", "")
-                    cuatrimestre = clase.get("cuatrimestre", "")
+
+                    cuatrimestre = clase.get(
+                        "cuatrimestre",
+                        ""
+                    )
 
                     contexto = " | ".join(
-                        dato
-                        for dato in [carrera, cuatrimestre]
+                        str(dato)
+                        for dato in [
+                            carrera,
+                            cuatrimestre
+                        ]
                         if dato
                     )
 
                     linea = (
                         f"•  {maestro}\n"
-                        f"    {materia}\n"
-                        f"    {fecha}  |  {hora}"
+                        f"   {materia}\n"
+                        f"   {fecha}  |  {hora}"
                     )
 
                     if contexto:
-                        linea += f"\n    {contexto}"
+                        linea += f"\n   {contexto}"
 
                     lineas.append(linea)
 
@@ -1204,54 +1385,70 @@ class VisInicio(QWidget):
                 "No fue posible consultar la actividad reciente."
             )
 
+            self.lbl_actividad.setAlignment(
+                Qt.AlignCenter
+            )
+
     # ======================================================
     # NAVEGACIÓN
     # ======================================================
 
     def cambiar_seccion(self, nombre):
 
-        if nombre == "Inicio":
+        try:
 
-            self.actualizar_supervision()
+            if nombre == "Inicio":
 
-            self.paginas.setCurrentIndex(
-                self.indices["Inicio"]
-            )
+                self.actualizar_supervision()
 
-        elif nombre == "Maestros":
+            elif nombre == "Maestros":
 
-            self.mostrar_maestros()
-            return
+                self.mostrar_maestros()
+                return
 
-        elif nombre == "Materias":
+            elif nombre == "Materias":
 
-            self.pagina_materias.cargar_lista_materias()
+                self.pagina_materias.cargar_lista_materias()
 
-            self.paginas.setCurrentIndex(
-                self.indices["Materias"]
-            )
+            elif nombre == "Horarios":
 
-        elif nombre == "Horarios":
+                self.pagina_horarios.cargar_datos()
+                self.pagina_horarios.cargar_horarios()
 
-            self.pagina_horarios.cargar_datos()
-            self.pagina_horarios.cargar_horarios()
+            elif nombre == "Asistencias":
 
-            self.paginas.setCurrentIndex(
-                self.indices["Horarios"]
-            )
+                self.pagina_asistencias.cargar_datos()
 
-        elif nombre in self.indices:
+            elif nombre not in self.indices:
+
+                self.mostrar_pagina_provisional(nombre)
+                return
 
             self.paginas.setCurrentIndex(
                 self.indices[nombre]
             )
 
-        else:
+            self.menu_lateral.setVisible(nombre != "Configuración")
+            self.actualizar_boton_seleccionado(nombre)
 
-            self.mostrar_pagina_provisional(nombre)
-            return
+        except Exception as error:
 
-        self.actualizar_boton_seleccionado(nombre)
+            print(
+                f"ERROR AL ABRIR LA SECCIÓN {nombre}:",
+                error
+            )
+
+            QMessageBox.critical(
+                self,
+                "Error de navegación",
+                f"No fue posible abrir la sección:\n{nombre}\n\n"
+                f"Detalle: {error}"
+            )
+
+    def volver_al_panel_principal(self):
+        self.menu_lateral.setVisible(True)
+        self.paginas.setCurrentIndex(self.indices["Inicio"])
+        self.actualizar_boton_seleccionado("Inicio")
 
     # ======================================================
     # BOTÓN SELECCIONADO
@@ -1289,6 +1486,10 @@ class VisInicio(QWidget):
 
         self.paginas.setCurrentIndex(
             self.indices["Nuevo maestro"]
+        )
+
+        self.actualizar_boton_seleccionado(
+            "Maestros"
         )
 
     def maestro_registrado(self, maestro):
@@ -1339,6 +1540,10 @@ class VisInicio(QWidget):
 
         self.paginas.setCurrentIndex(indice)
 
+        self.actualizar_boton_seleccionado(
+            "Maestros"
+        )
+
     def maestro_actualizado(self, maestro):
 
         self.pagina_maestros.actualizar_lista()
@@ -1367,9 +1572,8 @@ class VisInicio(QWidget):
 
             QMessageBox.information(
                 self,
-                "Módulo pendiente",
-                "El módulo de registro facial todavía no está "
-                "disponible.\n\n"
+                "Módulo no disponible",
+                "El módulo de registro facial no está disponible.\n\n"
                 f"Detalle: {error}"
             )
 
@@ -1399,6 +1603,10 @@ class VisInicio(QWidget):
 
         self.paginas.setCurrentIndex(indice)
 
+        self.actualizar_boton_seleccionado(
+            "Maestros"
+        )
+
     # ======================================================
     # PÁGINAS PROVISIONALES
     # ======================================================
@@ -1411,7 +1619,9 @@ class VisInicio(QWidget):
                 self.indices[nombre]
             )
 
-            self.actualizar_boton_seleccionado(nombre)
+            self.actualizar_boton_seleccionado(
+                nombre
+            )
 
             return
 
@@ -1442,6 +1652,8 @@ class VisInicio(QWidget):
             "Esta sección todavía está pendiente de desarrollo."
         )
 
+        mensaje.setWordWrap(True)
+
         mensaje.setStyleSheet("""
             color: #475569;
             font-size: 14px;
@@ -1455,8 +1667,29 @@ class VisInicio(QWidget):
         indice = self.paginas.addWidget(pagina)
 
         self.indices[nombre] = indice
+
         self.paginas_provisionales[nombre] = pagina
 
         self.paginas.setCurrentIndex(indice)
 
         self.actualizar_boton_seleccionado(nombre)
+
+    # ======================================================
+    # CIERRE DE LA VISTA
+    # ======================================================
+
+    def closeEvent(self, event):
+
+        if hasattr(self, "timer_reloj"):
+            self.timer_reloj.stop()
+
+        if hasattr(self, "timer_supervision"):
+            self.timer_supervision.stop()
+
+        if hasattr(self, "pagina_checador"):
+            try:
+                self.pagina_checador.detener_camara()
+            except Exception:
+                pass
+
+        super().closeEvent(event)

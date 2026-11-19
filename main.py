@@ -1,6 +1,8 @@
 
 import sys
 
+from PySide6.QtCore import Qt
+
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -9,6 +11,10 @@ from PySide6.QtWidgets import (
 
 from Vistas.VisLogin import VisLogin
 from Vistas.VisInicio import VisInicio
+from Configuracion.EstilosDialogos import (
+    ESTILO_DIALOGOS,
+    TraductorBotonesMensaje,
+)
 
 
 class ArkosChecador(QMainWindow):
@@ -89,7 +95,11 @@ class ArkosChecador(QMainWindow):
 
 if __name__ == "__main__":
 
+    QApplication.setAttribute(Qt.AA_DontUseNativeDialogs, True)
     app = QApplication(sys.argv)
+    app.setStyleSheet(ESTILO_DIALOGOS)
+    traductor_botones = TraductorBotonesMensaje(app)
+    app.installEventFilter(traductor_botones)
 
     ventana = ArkosChecador()
     ventana.show()

@@ -2,13 +2,13 @@
 # ==========================================================
 # VISTA DE MATERIAS
 # Archivo: Vistas/VisMaterias.py
+# CONEXION: MYSQL
 # ==========================================================
 
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QFormLayout,
     QGridLayout,
     QLabel,
     QLineEdit,
@@ -26,22 +26,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from Configuracion.Firebase import db
+from mysql.connector import Error
 
-from Servicios.ServicioMaterias import (
-    registrar_materia,
-    cargar_materias,
-    actualizar_materia,
-    desactivar_materia
-)
+from Configuracion.ConexionMySQL import obtener_conexion
 
 
 # ==========================================================
-# CONFIGURACIÓN
+# CONFIGURACION
 # ==========================================================
 
-COLECCION_MATERIAS = "tblMaterias"
-COLECCION_HORARIOS = "tblHorarios"
+TABLA_MATERIAS = "tblMaterias"
+TABLA_HORARIOS = "tblHorarios"
 
 CARRERAS = {
     "LAET": "Administración de Empresas Turísticas",
@@ -73,11 +68,48 @@ class VisMaterias(QWidget):
         super().__init__()
 
         self.materias = []
-        self.materias_filtradas = []
         self.materia_seleccionada = None
 
         self.crear_interfaz()
         self.cargar_lista_materias()
+
+    # ======================================================
+    # CONEXION MYSQL
+    # ======================================================
+
+    def obtener_conexion_mysql(self):
+
+        conexion = obtener_conexion()
+
+        if conexion is None:
+            raise ConnectionError(
+                "No fue posible conectar con MySQL."
+            )
+
+        return conexion
+
+    # ======================================================
+    # CONVERTIR REGISTRO
+    # ======================================================
+
+    def convertir_materia(self, registro):
+
+        if not registro:
+            return None
+
+        return {
+            "id": str(registro["id_materia"]),
+            "nombre": registro["nombre"],
+            "carrera": registro["carrera"],
+            "cuatrimestre": registro["cuatrimestre"],
+            "activo": str(
+                registro["estado"]
+            ).upper() == "ACTIVA",
+            "estado": registro["estado"],
+            "fecha_registro": registro.get(
+                "fecha_registro"
+            )
+        }
 
     # ======================================================
     # INTERFAZ PRINCIPAL
@@ -93,9 +125,7 @@ class VisMaterias(QWidget):
 
         layout_principal.setSpacing(17)
 
-        # ==================================================
         # ENCABEZADO
-        # ==================================================
 
         encabezado = QHBoxLayout()
         encabezado.setSpacing(15)
@@ -146,9 +176,7 @@ class VisMaterias(QWidget):
 
         layout_principal.addLayout(encabezado)
 
-        # ==================================================
         # INDICADORES
-        # ==================================================
 
         indicadores = QGridLayout()
         indicadores.setSpacing(13)
@@ -183,9 +211,7 @@ class VisMaterias(QWidget):
 
         layout_principal.addLayout(indicadores)
 
-        # ==================================================
         # FORMULARIO
-        # ==================================================
 
         self.marco_formulario = QFrame()
         self.marco_formulario.setObjectName("marcoFormulario")
@@ -296,9 +322,7 @@ class VisMaterias(QWidget):
 
         layout_formulario.addLayout(formulario)
 
-        # ==================================================
-        # BOTONES DEL FORMULARIO
-        # ==================================================
+        # BOTONES
 
         fila_botones = QHBoxLayout()
         fila_botones.setSpacing(9)
@@ -360,9 +384,7 @@ class VisMaterias(QWidget):
 
         layout_principal.addWidget(self.marco_formulario)
 
-        # ==================================================
-        # DIRECTORIO DE MATERIAS
-        # ==================================================
+        # DIRECTORIO
 
         marco_tabla = QFrame()
         marco_tabla.setObjectName("marcoTabla")
@@ -415,9 +437,7 @@ class VisMaterias(QWidget):
 
         layout_tabla.addLayout(encabezado_tabla)
 
-        # ==================================================
-        # BUSCADOR Y FILTROS
-        # ==================================================
+        # BUSCADOR
 
         barra_busqueda = QHBoxLayout()
         barra_busqueda.setSpacing(9)
@@ -446,9 +466,7 @@ class VisMaterias(QWidget):
 
         layout_tabla.addLayout(barra_busqueda)
 
-        # ==================================================
         # TABLA
-        # ==================================================
 
         self.tabla = QTableWidget()
 
@@ -496,9 +514,7 @@ class VisMaterias(QWidget):
 
         layout_tabla.addWidget(self.tabla, 1)
 
-        # ==================================================
         # PIE
-        # ==================================================
 
         pie_tabla = QHBoxLayout()
 
@@ -520,9 +536,7 @@ class VisMaterias(QWidget):
 
         layout_principal.addWidget(marco_tabla, 1)
 
-        # ==================================================
         # CONEXIONES
-        # ==================================================
 
         self.btn_registrar.clicked.connect(self.registrar)
         self.btn_modificar.clicked.connect(self.modificar)
@@ -689,7 +703,7 @@ class VisMaterias(QWidget):
         """)
 
     # ======================================================
-    # TARJETAS DE INDICADORES
+    # TARJETAS
     # ======================================================
 
     def crear_tarjeta_indicador(
@@ -763,43 +777,56 @@ class VisMaterias(QWidget):
         self.lbl_inactivas.setText(str(inactivas))
 
     # ======================================================
-    # CARGAR MATERIAS
+    # CARGAR MATERIAS DESDE MYSQL
     # ======================================================
 
     def cargar_lista_materias(self):
 
+        conexion = None
+        cursor = None
+
         try:
 
-            resultado = cargar_materias(
-                solo_activas=False
-            )
+            conexion = self.obtener_conexion_mysql()
 
-            self.materias = (
-                resultado
-                if isinstance(resultado, list)
-                else []
-            )
+            cursor = conexion.cursor(dictionary=True)
 
-            self.materias = [
-                materia
-                for materia in self.materias
-                if isinstance(materia, dict)
-            ]
+            cursor.execute("""
+                SELECT
+                    id_materia,
+                    nombre,
+                    carrera,
+                    cuatrimestre,
+                    estado,
+                    fecha_registro
+                FROM tblMaterias
+                ORDER BY id_materia ASC
+            """)
+
+            registros = cursor.fetchall()
+
+            self.materias = []
+
+            for registro in registros:
+
+                materia = self.convertir_materia(
+                    registro
+                )
+
+                if materia:
+                    self.materias.append(materia)
 
             self.actualizar_indicadores()
-
-            self.txt_buscar.clear()
 
             self.mostrar_materias_en_tabla(
                 self.materias
             )
 
             self.materia_seleccionada = None
-
             self.actualizar_estado_botones()
 
             self.lbl_estado.setText(
-                "Selecciona una materia para consultar o modificar sus datos."
+                "Materias cargadas correctamente desde MySQL."
             )
 
         except Exception as error:
@@ -807,11 +834,19 @@ class VisMaterias(QWidget):
             QMessageBox.critical(
                 self,
                 "Error al cargar materias",
-                f"No se pudieron cargar las materias:\n\n{error}"
+                f"No se pudieron cargar las materias desde MySQL:\n\n{error}"
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # MOSTRAR MATERIAS EN TABLA
+    # MOSTRAR MATERIAS
     # ======================================================
 
     def mostrar_materias_en_tabla(self, materias):
@@ -826,28 +861,13 @@ class VisMaterias(QWidget):
 
             for fila, materia in enumerate(materias):
 
-                identificador = str(
-                    materia.get("id", "")
-                )
-
-                nombre = materia.get("nombre", "")
-                carrera = materia.get("carrera", "")
-                cuatrimestre = materia.get("cuatrimestre", "")
-
-                activa = materia.get("activo", True)
-
-                estado = (
-                    "ACTIVA"
-                    if activa
-                    else "INACTIVA"
-                )
-
                 valores = [
-                    identificador,
-                    nombre,
-                    carrera,
-                    cuatrimestre,
-                    estado
+                    materia.get("id", ""),
+                    materia.get("nombre", ""),
+                    materia.get("carrera", ""),
+                    materia.get("cuatrimestre", ""),
+                    "ACTIVA" if materia.get("activo", True)
+                    else "INACTIVA"
                 ]
 
                 for columna, valor in enumerate(valores):
@@ -861,22 +881,25 @@ class VisMaterias(QWidget):
                     )
 
                     if columna == 0:
+
                         elemento.setForeground(
                             QColor("#003B73")
                         )
 
                     elif columna == 4:
 
-                        if activa:
-                            elemento.setForeground(
-                                QColor("#15803D")
-                            )
-                        else:
-                            elemento.setForeground(
-                                QColor("#D97706")
-                            )
+                        color = (
+                            "#15803D"
+                            if materia.get("activo", True)
+                            else "#D97706"
+                        )
+
+                        elemento.setForeground(
+                            QColor(color)
+                        )
 
                     else:
+
                         elemento.setForeground(
                             QColor("#334155")
                         )
@@ -966,8 +989,6 @@ class VisMaterias(QWidget):
         self.mostrar_materias_en_tabla(filtradas)
 
         self.materia_seleccionada = None
-        self.tabla.clearSelection()
-
         self.actualizar_estado_botones()
 
         self.lbl_estado.setText(
@@ -1047,7 +1068,9 @@ class VisMaterias(QWidget):
 
     def actualizar_estado_botones(self):
 
-        seleccionada = self.materia_seleccionada is not None
+        seleccionada = (
+            self.materia_seleccionada is not None
+        )
 
         activa = (
             seleccionada
@@ -1059,23 +1082,18 @@ class VisMaterias(QWidget):
         self.btn_eliminar.setEnabled(seleccionada)
 
         if seleccionada:
-
             self.lbl_modo.setText("MATERIA SELECCIONADA")
-
         else:
-
             self.lbl_modo.setText("NUEVO REGISTRO")
 
     # ======================================================
-    # REGISTRAR
+    # REGISTRAR MATERIA EN MYSQL
     # ======================================================
 
     def registrar(self):
 
         nombre = self.txt_nombre.text().strip()
-
         carrera = self.cmb_carrera.currentData()
-
         cuatrimestre = self.cmb_cuatrimestre.currentText()
 
         if not nombre:
@@ -1089,18 +1107,37 @@ class VisMaterias(QWidget):
             self.txt_nombre.setFocus()
             return
 
+        conexion = None
+        cursor = None
+
         try:
 
-            identificador = registrar_materia(
+            conexion = self.obtener_conexion_mysql()
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                INSERT INTO tblMaterias (
+                    nombre,
+                    carrera,
+                    cuatrimestre,
+                    estado
+                )
+                VALUES (%s, %s, %s, %s)
+            """, (
                 nombre,
                 carrera,
-                cuatrimestre
-            )
+                cuatrimestre,
+                "ACTIVA"
+            ))
+
+            identificador = cursor.lastrowid
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Materia registrada",
-                "La materia se registró correctamente.\n\n"
+                "La materia se registró correctamente en MySQL.\n\n"
                 f"ID: {identificador}"
             )
 
@@ -1109,14 +1146,25 @@ class VisMaterias(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.warning(
                 self,
                 "No se pudo registrar",
                 str(error)
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # MODIFICAR
+    # MODIFICAR MATERIA EN MYSQL
     # ======================================================
 
     def modificar(self):
@@ -1165,19 +1213,49 @@ class VisMaterias(QWidget):
         if respuesta != QMessageBox.Yes:
             return
 
+        conexion = None
+        cursor = None
+
         try:
 
-            actualizar_materia(
-                self.materia_seleccionada["id"],
+            conexion = self.obtener_conexion_mysql()
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                UPDATE tblMaterias
+                SET
+                    nombre = %s,
+                    carrera = %s,
+                    cuatrimestre = %s
+                WHERE id_materia = %s
+            """, (
                 nombre,
                 self.cmb_carrera.currentData(),
-                self.cmb_cuatrimestre.currentText()
-            )
+                self.cmb_cuatrimestre.currentText(),
+                int(self.materia_seleccionada["id"])
+            ))
+
+            if cursor.rowcount == 0:
+
+                cursor.execute("""
+                    SELECT id_materia
+                    FROM tblMaterias
+                    WHERE id_materia = %s
+                """, (
+                    int(self.materia_seleccionada["id"]),
+                ))
+
+                if not cursor.fetchone():
+                    raise ValueError(
+                        "No se encontró la materia seleccionada."
+                    )
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Materia modificada",
-                "Los cambios se guardaron correctamente."
+                "Los cambios se guardaron correctamente en MySQL."
             )
 
             self.limpiar_formulario()
@@ -1185,14 +1263,25 @@ class VisMaterias(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.warning(
                 self,
                 "No se pudo modificar",
                 str(error)
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # DESACTIVAR
+    # DESACTIVAR MATERIA EN MYSQL
     # ======================================================
 
     def desactivar(self):
@@ -1221,7 +1310,7 @@ class VisMaterias(QWidget):
             self,
             "Confirmar desactivación",
             "¿Deseas desactivar esta materia?\n\n"
-            "La información se conservará en Firebase.",
+            "La información y los horarios asociados se conservarán en MySQL.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -1229,16 +1318,43 @@ class VisMaterias(QWidget):
         if respuesta != QMessageBox.Yes:
             return
 
+        conexion = None
+        cursor = None
+
         try:
 
-            desactivar_materia(
-                self.materia_seleccionada["id"]
-            )
+            conexion = self.obtener_conexion_mysql()
+            cursor = conexion.cursor()
+
+            cursor.execute("""
+                UPDATE tblMaterias
+                SET estado = 'INACTIVA'
+                WHERE id_materia = %s
+            """, (
+                int(self.materia_seleccionada["id"]),
+            ))
+
+            if cursor.rowcount == 0:
+
+                cursor.execute("""
+                    SELECT id_materia
+                    FROM tblMaterias
+                    WHERE id_materia = %s
+                """, (
+                    int(self.materia_seleccionada["id"]),
+                ))
+
+                if not cursor.fetchone():
+                    raise ValueError(
+                        "No se encontró la materia seleccionada."
+                    )
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Materia desactivada",
-                "La materia se desactivó correctamente."
+                "La materia se desactivó correctamente en MySQL."
             )
 
             self.limpiar_formulario()
@@ -1246,14 +1362,25 @@ class VisMaterias(QWidget):
 
         except Exception as error:
 
+            if conexion:
+                conexion.rollback()
+
             QMessageBox.warning(
                 self,
-                "Error",
+                "Error al desactivar",
                 str(error)
             )
 
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
+
     # ======================================================
-    # ELIMINAR DEFINITIVAMENTE
+    # ELIMINAR MATERIA DE MYSQL
     # ======================================================
 
     def eliminar(self):
@@ -1277,8 +1404,7 @@ class VisMaterias(QWidget):
             f"¿Estás seguro de eliminar esta materia?\n\n"
             f"Materia: {nombre}\n"
             f"ID: {identificador}\n\n"
-            "Esta acción eliminará definitivamente el registro "
-            "de Firebase y no se puede deshacer.",
+            "La operación es definitiva y no se puede deshacer.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -1286,53 +1412,95 @@ class VisMaterias(QWidget):
         if respuesta != QMessageBox.Yes:
             return
 
+        conexion = None
+        cursor = None
+
         try:
 
-            horarios = (
-                db.collection(COLECCION_HORARIOS)
-                .where("id_materia", "==", identificador)
-                .stream()
-            )
+            conexion = self.obtener_conexion_mysql()
+            cursor = conexion.cursor()
 
-            tiene_horarios = any(
-                True for _ in horarios
-            )
+            # COMPROBAR SI EXISTEN HORARIOS ASOCIADOS
 
-            if tiene_horarios:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM tblHorarios
+                WHERE id_materia = %s
+            """, (
+                int(identificador),
+            ))
+
+            resultado = cursor.fetchone()
+            cantidad_horarios = resultado[0]
+
+            if cantidad_horarios > 0:
 
                 QMessageBox.warning(
                     self,
                     "No se puede eliminar",
                     "Esta materia tiene horarios asociados.\n\n"
-                    "Para conservar el historial académico, "
-                    "primero debes revisar esos horarios.\n\n"
-                    "Puedes desactivar la materia en lugar de eliminarla."
+                    "Para proteger el historial académico, "
+                    "no se permite eliminarla definitivamente.\n\n"
+                    "Puedes desactivarla en su lugar."
                 )
 
                 return
 
-            db.collection(
-                COLECCION_MATERIAS
-            ).document(
-                identificador
-            ).delete()
+            # ELIMINAR
+
+            cursor.execute("""
+                DELETE FROM tblMaterias
+                WHERE id_materia = %s
+            """, (
+                int(identificador),
+            ))
+
+            if cursor.rowcount == 0:
+                raise ValueError(
+                    "No se encontró la materia que deseas eliminar."
+                )
+
+            conexion.commit()
 
             QMessageBox.information(
                 self,
                 "Materia eliminada",
-                "La materia se eliminó definitivamente de Firebase."
+                "La materia se eliminó correctamente de MySQL."
             )
 
             self.limpiar_formulario()
             self.cargar_lista_materias()
 
-        except Exception as error:
+        except Error as error:
+
+            if conexion:
+                conexion.rollback()
 
             QMessageBox.critical(
                 self,
                 "Error al eliminar",
-                f"No se pudo eliminar la materia:\n\n{error}"
+                "MySQL no permitió eliminar la materia.\n\n"
+                f"Detalle: {error}"
             )
+
+        except Exception as error:
+
+            if conexion:
+                conexion.rollback()
+
+            QMessageBox.critical(
+                self,
+                "Error al eliminar",
+                str(error)
+            )
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if conexion:
+                conexion.close()
 
     # ======================================================
     # LIMPIAR FORMULARIO

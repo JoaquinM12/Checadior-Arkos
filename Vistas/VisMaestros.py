@@ -1,4 +1,10 @@
 
+# ==========================================================
+# ARKOS CHECADOR
+# VISTA DE ADMINISTRACION DE MAESTROS
+# BASE DE DATOS: MYSQL
+# ==========================================================
+
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -45,9 +51,7 @@ class VisMaestros(QWidget):
         layout_principal.setContentsMargins(25, 22, 25, 22)
         layout_principal.setSpacing(18)
 
-        # =================================================
         # ENCABEZADO
-        # =================================================
 
         encabezado = QHBoxLayout()
         encabezado.setSpacing(15)
@@ -80,6 +84,7 @@ class VisMaestros(QWidget):
         self.btn_nuevo.setMinimumHeight(43)
         self.btn_nuevo.setMinimumWidth(165)
         self.btn_nuevo.setCursor(Qt.PointingHandCursor)
+
         self.btn_nuevo.setStyleSheet("""
             QPushButton {
                 background-color: #003B73;
@@ -101,50 +106,35 @@ class VisMaestros(QWidget):
         """)
 
         encabezado.addWidget(self.btn_nuevo)
-
         layout_principal.addLayout(encabezado)
 
-        # =================================================
         # INDICADORES
-        # =================================================
 
         indicadores = QGridLayout()
         indicadores.setSpacing(13)
 
         self.card_total, self.lbl_total = self.crear_tarjeta_indicador(
-            "TOTAL DE MAESTROS",
-            "0",
-            "#003B73",
-            "#EAF2FA"
+            "TOTAL DE MAESTROS", "0", "#003B73", "#EAF2FA"
         )
 
         self.card_activos, self.lbl_activos = self.crear_tarjeta_indicador(
-            "MAESTROS ACTIVOS",
-            "0",
-            "#15803D",
-            "#EAF7EF"
+            "MAESTROS ACTIVOS", "0", "#15803D", "#EAF7EF"
         )
 
         self.card_inactivos, self.lbl_inactivos = self.crear_tarjeta_indicador(
-            "MAESTROS INACTIVOS",
-            "0",
-            "#D97706",
-            "#FFF7E8"
+            "MAESTROS INACTIVOS", "0", "#D97706", "#FFF7E8"
         )
 
         indicadores.addWidget(self.card_total, 0, 0)
         indicadores.addWidget(self.card_activos, 0, 1)
         indicadores.addWidget(self.card_inactivos, 0, 2)
 
-        indicadores.setColumnStretch(0, 1)
-        indicadores.setColumnStretch(1, 1)
-        indicadores.setColumnStretch(2, 1)
+        for columna in range(3):
+            indicadores.setColumnStretch(columna, 1)
 
         layout_principal.addLayout(indicadores)
 
-        # =================================================
         # CONTENEDOR DE TABLA
-        # =================================================
 
         contenedor_tabla = QFrame()
         contenedor_tabla.setObjectName("contenedorTabla")
@@ -161,9 +151,7 @@ class VisMaestros(QWidget):
         layout_tabla.setContentsMargins(18, 17, 18, 15)
         layout_tabla.setSpacing(14)
 
-        # =================================================
         # ENCABEZADO DE TABLA
-        # =================================================
 
         encabezado_tabla = QHBoxLayout()
 
@@ -187,12 +175,9 @@ class VisMaestros(QWidget):
         """)
 
         encabezado_tabla.addWidget(self.lbl_resultados)
-
         layout_tabla.addLayout(encabezado_tabla)
 
-        # =================================================
         # BUSCADOR
-        # =================================================
 
         barra_busqueda = QHBoxLayout()
         barra_busqueda.setSpacing(10)
@@ -244,15 +229,11 @@ class VisMaestros(QWidget):
         """)
 
         barra_busqueda.addWidget(self.btn_actualizar)
-
         layout_tabla.addLayout(barra_busqueda)
 
-        # =================================================
-        # TABLA DE MAESTROS
-        # =================================================
+        # TABLA
 
         self.tabla = QTableWidget()
-
         self.tabla.setColumnCount(5)
 
         self.tabla.setHorizontalHeaderLabels([
@@ -263,18 +244,9 @@ class VisMaestros(QWidget):
             "Fecha de registro"
         ])
 
-        self.tabla.setSelectionBehavior(
-            QTableWidget.SelectRows
-        )
-
-        self.tabla.setSelectionMode(
-            QTableWidget.SingleSelection
-        )
-
-        self.tabla.setEditTriggers(
-            QTableWidget.NoEditTriggers
-        )
-
+        self.tabla.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabla.setSelectionMode(QTableWidget.SingleSelection)
+        self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tabla.setAlternatingRowColors(True)
         self.tabla.setShowGrid(False)
         self.tabla.setWordWrap(False)
@@ -283,11 +255,7 @@ class VisMaestros(QWidget):
         self.tabla.verticalHeader().setDefaultSectionSize(48)
 
         encabezado_horizontal = self.tabla.horizontalHeader()
-
-        encabezado_horizontal.setSectionResizeMode(
-            QHeaderView.Stretch
-        )
-
+        encabezado_horizontal.setSectionResizeMode(QHeaderView.Stretch)
         encabezado_horizontal.setMinimumSectionSize(75)
 
         self.tabla.setStyleSheet("""
@@ -352,9 +320,7 @@ class VisMaestros(QWidget):
 
         layout_tabla.addWidget(self.tabla, 1)
 
-        # =================================================
         # PIE DE TABLA
-        # =================================================
 
         pie_tabla = QHBoxLayout()
 
@@ -372,12 +338,9 @@ class VisMaestros(QWidget):
         pie_tabla.addStretch()
 
         layout_tabla.addLayout(pie_tabla)
-
         layout_principal.addWidget(contenedor_tabla, 1)
 
-        # =================================================
         # ACCIONES
-        # =================================================
 
         contenedor_acciones = QFrame()
         contenedor_acciones.setObjectName("contenedorAcciones")
@@ -462,9 +425,7 @@ class VisMaestros(QWidget):
 
         layout_principal.addWidget(contenedor_acciones)
 
-        # =================================================
         # CONEXIONES
-        # =================================================
 
         self.btn_nuevo.clicked.connect(
             self.nuevo_maestro_solicitado.emit
@@ -549,14 +510,19 @@ class VisMaestros(QWidget):
         return tarjeta, lbl_valor
 
     # =====================================================
-    # ACTUALIZAR LISTA
+    # ACTUALIZAR LISTA DESDE MYSQL
     # =====================================================
 
     def actualizar_lista(self):
 
         try:
 
-            self.maestros = cargar_maestros() or []
+            maestros = cargar_maestros()
+
+            if maestros is None:
+                maestros = []
+
+            self.maestros = maestros
 
             self.txt_buscar.clear()
 
@@ -577,7 +543,7 @@ class VisMaestros(QWidget):
             QMessageBox.critical(
                 self,
                 "Error al cargar maestros",
-                f"No se pudo cargar la lista de maestros:\n\n{error}"
+                f"No se pudo consultar MySQL:\n\n{error}"
             )
 
     # =====================================================
@@ -633,29 +599,17 @@ class VisMaestros(QWidget):
                 for columna, valor in enumerate(valores):
 
                     elemento = QTableWidgetItem(str(valor))
-
                     elemento.setTextAlignment(Qt.AlignCenter)
 
                     if columna == 0:
-                        elemento.setForeground(
-                            QColor("#003B73")
-                        )
-                        elemento.setFont(
-                            self.tabla.font()
-                        )
+                        elemento.setForeground(QColor("#003B73"))
 
                     if columna == 3:
 
-                        elemento.setTextAlignment(Qt.AlignCenter)
-
                         if activo:
-                            elemento.setForeground(
-                                QColor("#15803D")
-                            )
+                            elemento.setForeground(QColor("#15803D"))
                         else:
-                            elemento.setForeground(
-                                QColor("#D97706")
-                            )
+                            elemento.setForeground(QColor("#D97706"))
 
                     self.tabla.setItem(
                         fila,
@@ -668,7 +622,6 @@ class VisMaestros(QWidget):
             )
 
         finally:
-
             self.tabla.blockSignals(False)
 
     # =====================================================
@@ -680,7 +633,6 @@ class VisMaestros(QWidget):
         texto = texto.strip().lower()
 
         if not texto:
-
             filtrados = self.maestros
 
         else:
@@ -709,7 +661,6 @@ class VisMaestros(QWidget):
                     or texto in apellidos
                     or texto in nombre_completo
                 ):
-
                     filtrados.append(maestro)
 
         self.mostrar_maestros_en_tabla(filtrados)
@@ -748,7 +699,7 @@ class VisMaestros(QWidget):
 
         for maestro in self.maestros:
 
-            if maestro.get("id") == id_maestro:
+            if str(maestro.get("id")) == id_maestro:
                 return maestro
 
         return None

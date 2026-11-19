@@ -1,4 +1,10 @@
 
+# ==========================================================
+# ARKOS CHECADOR
+# REGISTRO DE NUEVOS MAESTROS
+# BASE DE DATOS: MYSQL
+# ==========================================================
+
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -9,8 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QFormLayout,
     QFrame,
-    QSizePolicy,
-    QSpacerItem
+    QSizePolicy
 )
 
 from PySide6.QtCore import Qt, Signal
@@ -28,6 +33,10 @@ class VisNuevoMaestro(QWidget):
 
         self.crear_interfaz()
         self.aplicar_estilos()
+
+    # ======================================================
+    # CREAR INTERFAZ
+    # ======================================================
 
     def crear_interfaz(self):
 
@@ -75,6 +84,7 @@ class VisNuevoMaestro(QWidget):
         tarjeta = QFrame()
         tarjeta.setObjectName("tarjetaFormulario")
         tarjeta.setMaximumWidth(850)
+
         tarjeta.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Preferred
@@ -84,7 +94,7 @@ class VisNuevoMaestro(QWidget):
         layout_tarjeta.setContentsMargins(30, 28, 30, 28)
         layout_tarjeta.setSpacing(22)
 
-        # Encabezado de tarjeta
+        # ENCABEZADO DE TARJETA
 
         encabezado_formulario = QHBoxLayout()
 
@@ -121,7 +131,7 @@ class VisNuevoMaestro(QWidget):
         layout_tarjeta.addWidget(separador)
 
         # ==================================================
-        # CAMPOS
+        # CAMPOS DEL FORMULARIO
         # ==================================================
 
         formulario = QFormLayout()
@@ -141,12 +151,18 @@ class VisNuevoMaestro(QWidget):
         self.txt_apellidos.setClearButtonEnabled(True)
 
         formulario.addRow(
-            self.crear_etiqueta_campo("Nombre(s)", "Escribe el nombre del docente"),
+            self.crear_etiqueta_campo(
+                "Nombre(s)",
+                "Escribe el nombre del docente"
+            ),
             self.txt_nombre
         )
 
         formulario.addRow(
-            self.crear_etiqueta_campo("Apellidos", "Escribe los apellidos"),
+            self.crear_etiqueta_campo(
+                "Apellidos",
+                "Escribe los apellidos"
+            ),
             self.txt_apellidos
         )
 
@@ -223,6 +239,7 @@ class VisNuevoMaestro(QWidget):
         # ==================================================
 
         self.btn_guardar.clicked.connect(self.guardar)
+
         self.btn_cancelar.clicked.connect(
             self.cancelar_solicitado.emit
         )
@@ -235,9 +252,14 @@ class VisNuevoMaestro(QWidget):
             self.guardar
         )
 
+    # ======================================================
+    # ETIQUETAS DE LOS CAMPOS
+    # ======================================================
+
     def crear_etiqueta_campo(self, titulo, descripcion):
 
         contenedor = QWidget()
+
         layout = QVBoxLayout(contenedor)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -255,6 +277,10 @@ class VisNuevoMaestro(QWidget):
         contenedor.setMinimumWidth(190)
 
         return contenedor
+
+    # ======================================================
+    # ESTILOS
+    # ======================================================
 
     def aplicar_estilos(self):
 
@@ -416,12 +442,17 @@ class VisNuevoMaestro(QWidget):
             }
         """)
 
+    # ======================================================
+    # GUARDAR MAESTRO EN MYSQL
+    # ======================================================
+
     def guardar(self):
 
         nombre = self.txt_nombre.text().strip()
         apellidos = self.txt_apellidos.text().strip()
 
         if not nombre or not apellidos:
+
             QMessageBox.warning(
                 self,
                 "Datos incompletos",
@@ -440,7 +471,14 @@ class VisNuevoMaestro(QWidget):
         self.btn_guardar.setText("Guardando...")
 
         try:
+
+            # El servicio registra el maestro directamente en MySQL.
             maestro = registrar_maestro(nombre, apellidos)
+
+            if not maestro:
+                raise Exception(
+                    "El servicio no devolvió la información del maestro registrado."
+                )
 
             self.lbl_id.setText(
                 f"ID asignado correctamente: {maestro['id']}"
@@ -464,10 +502,11 @@ class VisNuevoMaestro(QWidget):
             QMessageBox.critical(
                 self,
                 "Error de registro",
-                f"No se pudo registrar al maestro:\n\n{error}"
+                f"No se pudo registrar al maestro en MySQL:\n\n{error}"
             )
 
         finally:
+
             self.btn_guardar.setEnabled(True)
             self.btn_cancelar.setEnabled(True)
             self.btn_guardar.setText("Guardar maestro")

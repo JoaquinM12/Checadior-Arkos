@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt, Signal
+from Servicios.ServicioUsuarios import autenticar_usuario
 
 
 class VisLogin(QWidget):
@@ -19,6 +20,8 @@ class VisLogin(QWidget):
 
     def __init__(self):
         super().__init__()
+
+        self.usuario_actual = None
 
         self.crear_interfaz()
         self.aplicar_estilos()
@@ -541,19 +544,24 @@ class VisLogin(QWidget):
 
             return
 
-        # Credenciales provisionales para desarrollo
-        if usuario == "admin" and password == "Arkos2026!":
-
-            self.btn_ingresar.setEnabled(False)
-            self.btn_ingresar.setText("INICIANDO SESIÓN...")
-
-            self.login_exitoso.emit()
-
+        self.btn_ingresar.setEnabled(False)
+        self.btn_ingresar.setText("VALIDANDO...")
+        try:
+            cuenta = autenticar_usuario(usuario, password)
+        except Exception:
+            self.lbl_error.setText(
+                "No se pudo validar el acceso. Comprueba la conexión con MySQL."
+            )
             self.btn_ingresar.setEnabled(True)
             self.btn_ingresar.setText("INICIAR SESIÓN")
+            return
 
+        self.btn_ingresar.setEnabled(True)
+        self.btn_ingresar.setText("INICIAR SESIÓN")
+        if cuenta:
+            self.usuario_actual = cuenta
+            self.login_exitoso.emit()
         else:
-
             self.lbl_error.setText(
                 "Usuario o contraseña incorrectos."
             )

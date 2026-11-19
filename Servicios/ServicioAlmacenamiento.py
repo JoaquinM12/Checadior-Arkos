@@ -1,19 +1,19 @@
-import json
+
 from pathlib import Path
 from datetime import datetime
 
-from Configuracion.Firebase import db
+from Configuracion.ConexionMySQL import obtener_conexion
 
 
 # ==========================================================
 # CONFIGURACIÓN
 # ==========================================================
 
-COLECCION_MAESTROS = "tblMaestros"
+TABLA_MAESTROS = "tblMaestros"
 
 RUTA_PROYECTO = Path(__file__).resolve().parent.parent
 RUTA_DATOS = RUTA_PROYECTO / "DatosLocales"
-RUTA_MAESTROS = RUTA_DATOS / "maestros.json"
+RUTA_ARCHIVO_MAESTROS = RUTA_DATOS / "maestros.json"
 
 
 # ==========================================================
@@ -32,6 +32,21 @@ def es_id_maestro_valido(identificador):
     return numero.isdigit()
 
 
+def convertir_id_a_numero(identificador):
+
+    if not es_id_maestro_valido(identificador):
+        raise ValueError(
+            "El identificador del maestro no es válido."
+        )
+
+    return int(str(identificador).strip()[4:])
+
+
+def convertir_numero_a_id(numero):
+
+    return f"MST-{int(numero):04d}"
+
+
 # ==========================================================
 # PREPARAR ALMACENAMIENTO LOCAL
 # ==========================================================
@@ -43,73 +58,93 @@ def preparar_almacenamiento():
         exist_ok=True
     )
 
-    if not RUTA_MAESTROS.exists():
 
-        with open(
-            RUTA_MAESTROS,
-            "w",
-            encoding="utf-8"
-        ) as archivo:
+# ==========================================================
+# CONVERTIR REGISTRO MYSQL A DICCIONARIO
+# ==========================================================
 
-            json.dump(
-                [],
-                archivo,
-                ensure_ascii=False,
-                indent=4
-            )
+def convertir_registro_maestro(registro):
+
+    if not registro:
+        return None
+
+    nombre = str(
+        registro.get("nombre") or ""
+    ).strip()
+
+    apellidos = str(
+        registro.get("apellido") or ""
+    ).strip()
+
+    if not nombre or not apellidos:
+        return None
+
+    fecha = registro.get("fecha_registro")
+
+    if isinstance(fecha, datetime):
+        fecha = fecha.strftime("%Y-%m-%d %H:%M:%S")
+    elif fecha is not None:
+        fecha = str(fecha)
+
+    return {
+        "id": convertir_numero_a_id(
+            registro["id_maestro"]
+        ),
+        "nombre": nombre,
+        "apellidos": apellidos,
+        "activo": str(
+            registro.get("estado", "")
+        ).upper() == "ACTIVO",
+        "fecha_registro": fecha
+    }
 
 
 # ==========================================================
-# REFERENCIA A LA COLECCIÓN
-# ==========================================================
-
-def obtener_coleccion_maestros():
-
-    return db.collection(COLECCION_MAESTROS)
-
-
-# ==========================================================
-# CARGAR MAESTROS DESDE FIREBASE
+# CARGAR MAESTROS DESDE MYSQL
 # ==========================================================
 
 def cargar_maestros():
 
     print("\n========== CARGA DE MAESTROS ==========")
-    print("Origen: Firebase Firestore")
-    print("Colección:", COLECCION_MAESTROS)
+    print("Origen: MySQL")
+    print("Tabla:", TABLA_MAESTROS)
+
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
+        )
+
+    cursor = None
 
     try:
 
-        documentos = obtener_coleccion_maestros().stream()
+        cursor = conexion.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT
+                id_maestro,
+                nombre,
+                apellido,
+                estado,
+                fecha_registro
+            FROM tblMaestros
+            ORDER BY id_maestro ASC
+        """)
+
+        registros = cursor.fetchall()
 
         maestros = []
 
-        for documento in documentos:
+        for registro in registros:
 
-            identificador = documento.id
+            maestro = convertir_registro_maestro(
+                registro
+            )
 
-            # Ignorar documentos con ID automático de Firebase
-            if not es_id_maestro_valido(identificador):
-                print("Documento ignorado:", identificador)
-                continue
-
-            maestro = documento.to_dict() or {}
-
-            nombre = str(maestro.get("nombre", "")).strip()
-            apellidos = str(maestro.get("apellidos", "")).strip()
-
-            # Ignorar registros incompletos
-            if not nombre or not apellidos:
-                print("Maestro incompleto ignorado:", identificador)
-                continue
-
-            maestro["id"] = identificador
-
-            maestros.append(maestro)
-
-        maestros.sort(
-            key=lambda maestro: int(maestro["id"].split("-")[1])
-        )
+            if maestro:
+                maestros.append(maestro)
 
         print("Cantidad de maestros:", len(maestros))
         print("=======================================\n")
@@ -121,9 +156,16 @@ def cargar_maestros():
         print("ERROR AL CARGAR MAESTROS:", error)
         raise
 
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
+
 
 # ==========================================================
-# GUARDAR MAESTROS EN FIREBASE
+# GUARDAR MAESTROS EN MYSQL
 # ==========================================================
 
 def guardar_maestros(maestros):
@@ -134,44 +176,90 @@ def guardar_maestros(maestros):
             "Los datos de maestros deben estar en una lista."
         )
 
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
+        )
+
+    cursor = None
+
     try:
 
-        coleccion = obtener_coleccion_maestros()
+        cursor = conexion.cursor()
 
-        for inicio in range(0, len(maestros), 450):
+        for maestro in maestros:
 
-            lote = db.batch()
+            identificador = str(
+                maestro.get("id", "")
+            ).strip()
 
-            grupo = maestros[inicio:inicio + 450]
+            numero = convertir_id_a_numero(
+                identificador
+            )
 
-            for maestro in grupo:
+            nombre = str(
+                maestro.get("nombre", "")
+            ).strip()
 
-                identificador = str(
-                    maestro.get("id", "")
-                ).strip()
+            apellidos = str(
+                maestro.get("apellidos", "")
+            ).strip()
 
-                if not es_id_maestro_valido(identificador):
+            activo = bool(
+                maestro.get("activo", True)
+            )
 
-                    raise ValueError(
-                        f"Identificador de maestro inválido: {identificador}"
-                    )
+            if not nombre or not apellidos:
+                raise ValueError(
+                    f"Datos incompletos para el maestro {identificador}."
+                )
 
-                datos = maestro.copy()
-                datos["id"] = identificador
+            estado = (
+                "ACTIVO"
+                if activo
+                else "INACTIVO"
+            )
 
-                referencia = coleccion.document(identificador)
+            cursor.execute("""
+                INSERT INTO tblMaestros (
+                    id_maestro,
+                    nombre,
+                    apellido,
+                    estado
+                )
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    nombre = VALUES(nombre),
+                    apellido = VALUES(apellido),
+                    estado = VALUES(estado)
+            """, (
+                numero,
+                nombre,
+                apellidos,
+                estado
+            ))
 
-                # Guardar sin eliminar otros documentos
-                lote.set(referencia, datos)
+        conexion.commit()
 
-            lote.commit()
-
-        print("Maestros guardados correctamente en Firebase.")
+        print(
+            "Maestros guardados correctamente en MySQL."
+        )
 
     except Exception as error:
 
+        conexion.rollback()
+
         print("ERROR AL GUARDAR MAESTROS:", error)
         raise
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
 
 
 # ==========================================================
@@ -180,26 +268,39 @@ def guardar_maestros(maestros):
 
 def generar_id_maestro(maestros=None):
 
-    if maestros is None:
-        maestros = cargar_maestros()
+    conexion = obtener_conexion()
 
-    numeros = []
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
+        )
 
-    for maestro in maestros:
+    cursor = None
 
-        identificador = str(
-            maestro.get("id", "")
-        ).strip()
+    try:
 
-        if es_id_maestro_valido(identificador):
+        cursor = conexion.cursor()
 
-            numeros.append(
-                int(identificador.split("-")[1])
-            )
+        cursor.execute("""
+            SELECT COALESCE(MAX(id_maestro), 0) + 1
+            FROM tblMaestros
+        """)
 
-    siguiente = max(numeros, default=0) + 1
+        siguiente = cursor.fetchone()[0]
 
-    return f"MST-{siguiente:04d}"
+        return convertir_numero_a_id(siguiente)
+
+    except Exception as error:
+
+        print("ERROR AL GENERAR ID:", error)
+        raise
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
 
 
 # ==========================================================
@@ -208,8 +309,8 @@ def generar_id_maestro(maestros=None):
 
 def registrar_maestro(nombre, apellidos):
 
-    nombre = nombre.strip()
-    apellidos = apellidos.strip()
+    nombre = str(nombre).strip()
+    apellidos = str(apellidos).strip()
 
     if not nombre or not apellidos:
 
@@ -217,40 +318,70 @@ def registrar_maestro(nombre, apellidos):
             "Debes ingresar nombre y apellidos."
         )
 
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
+        )
+
+    cursor = None
+
     try:
 
-        maestros = cargar_maestros()
+        cursor = conexion.cursor()
 
-        identificador = generar_id_maestro(maestros)
+        cursor.execute("""
+            INSERT INTO tblMaestros (
+                nombre,
+                apellido,
+                estado
+            )
+            VALUES (%s, %s, %s)
+        """, (
+            nombre,
+            apellidos,
+            "ACTIVO"
+        ))
 
-        nuevo_maestro = {
+        numero = cursor.lastrowid
 
+        conexion.commit()
+
+        identificador = convertir_numero_a_id(
+            numero
+        )
+
+        maestro = {
             "id": identificador,
             "nombre": nombre,
             "apellidos": apellidos,
             "activo": True,
-
             "fecha_registro": datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-
         }
 
-        referencia = obtener_coleccion_maestros().document(
+        print(
+            "Maestro registrado:",
             identificador
         )
 
-        # Evitar sobrescribir un documento existente
-        referencia.create(nuevo_maestro)
-
-        print("Maestro registrado:", identificador)
-
-        return nuevo_maestro
+        return maestro
 
     except Exception as error:
 
+        conexion.rollback()
+
         print("ERROR AL REGISTRAR MAESTRO:", error)
         raise
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
 
 
 # ==========================================================
@@ -264,8 +395,8 @@ def actualizar_maestro(
     activo
 ):
 
-    nombre = nombre.strip()
-    apellidos = apellidos.strip()
+    nombre = str(nombre).strip()
+    apellidos = str(apellidos).strip()
 
     if not nombre or not apellidos:
 
@@ -279,42 +410,95 @@ def actualizar_maestro(
             "El identificador del maestro no es válido."
         )
 
-    try:
+    numero = convertir_id_a_numero(id_maestro)
 
-        referencia = obtener_coleccion_maestros().document(
-            id_maestro
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
         )
 
-        documento = referencia.get()
+    cursor = None
 
-        if not documento.exists:
+    try:
+
+        cursor = conexion.cursor(dictionary=True)
+
+        # COMPROBAR QUE EXISTA EL MAESTRO
+        cursor.execute("""
+            SELECT id_maestro
+            FROM tblMaestros
+            WHERE id_maestro = %s
+        """, (numero,))
+
+        if not cursor.fetchone():
 
             raise ValueError(
                 "No se encontró el maestro seleccionado."
             )
 
-        datos_actualizados = {
+        estado = (
+            "ACTIVO"
+            if bool(activo)
+            else "INACTIVO"
+        )
 
-            "nombre": nombre,
-            "apellidos": apellidos,
-            "activo": bool(activo)
+        # ACTUALIZAR
+        cursor.execute("""
+            UPDATE tblMaestros
+            SET
+                nombre = %s,
+                apellido = %s,
+                estado = %s
+            WHERE id_maestro = %s
+        """, (
+            nombre,
+            apellidos,
+            estado,
+            numero
+        ))
 
-        }
+        # RECUPERAR LOS DATOS ACTUALIZADOS
+        cursor.execute("""
+            SELECT
+                id_maestro,
+                nombre,
+                apellido,
+                estado,
+                fecha_registro
+            FROM tblMaestros
+            WHERE id_maestro = %s
+        """, (numero,))
 
-        referencia.update(datos_actualizados)
+        registro = cursor.fetchone()
 
-        maestro = documento.to_dict()
-        maestro.update(datos_actualizados)
-        maestro["id"] = id_maestro
+        conexion.commit()
 
-        print("Maestro actualizado:", id_maestro)
+        maestro = convertir_registro_maestro(
+            registro
+        )
+
+        print(
+            "Maestro actualizado:",
+            id_maestro
+        )
 
         return maestro
 
     except Exception as error:
 
+        conexion.rollback()
+
         print("ERROR AL ACTUALIZAR MAESTRO:", error)
         raise
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
 
 
 # ==========================================================
@@ -326,46 +510,81 @@ def buscar_maestro(id_maestro):
     if not es_id_maestro_valido(id_maestro):
         return None
 
-    try:
+    numero = convertir_id_a_numero(
+        id_maestro
+    )
 
-        referencia = obtener_coleccion_maestros().document(
-            id_maestro
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError(
+            "No fue posible conectar con MySQL."
         )
 
-        documento = referencia.get()
+    cursor = None
 
-        if not documento.exists:
-            return None
+    try:
 
-        maestro = documento.to_dict() or {}
+        cursor = conexion.cursor(dictionary=True)
 
-        if not maestro.get("nombre") or not maestro.get("apellidos"):
-            return None
+        cursor.execute("""
+            SELECT
+                id_maestro,
+                nombre,
+                apellido,
+                estado,
+                fecha_registro
+            FROM tblMaestros
+            WHERE id_maestro = %s
+        """, (numero,))
 
-        maestro["id"] = documento.id
+        registro = cursor.fetchone()
 
-        return maestro
+        return convertir_registro_maestro(
+            registro
+        )
 
     except Exception as error:
 
         print("ERROR AL BUSCAR MAESTRO:", error)
         raise
 
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        conexion.close()
+
 
 # ==========================================================
-# MIGRAR MAESTROS LOCALES A FIREBASE
+# MIGRAR MAESTROS LOCALES A MYSQL
 # ==========================================================
 
-def migrar_maestros_locales_a_firebase():
+def migrar_maestros_locales_a_mysql():
 
     preparar_almacenamiento()
 
-    print("\n========== MIGRACIÓN A FIREBASE ==========")
+    print("\n========== MIGRACIÓN A MYSQL ==========")
 
     try:
 
+        import json
+
+        if not RUTA_ARCHIVO_MAESTROS.exists():
+
+            print(
+                "No existe el archivo maestros.json."
+            )
+
+            return {
+                "migrados": 0,
+                "omitidos": 0,
+                "total_locales": 0
+            }
+
         with open(
-            RUTA_MAESTROS,
+            RUTA_ARCHIVO_MAESTROS,
             "r",
             encoding="utf-8"
         ) as archivo:
@@ -378,68 +597,110 @@ def migrar_maestros_locales_a_firebase():
                 "El archivo maestros.json no contiene una lista."
             )
 
-        coleccion = obtener_coleccion_maestros()
+        conexion = obtener_conexion()
 
-        documentos_actuales = {
-            documento.id
-            for documento in coleccion.stream()
-        }
+        if conexion is None:
+            raise ConnectionError(
+                "No fue posible conectar con MySQL."
+            )
 
-        migrados = 0
-        omitidos = 0
+        cursor = None
 
-        batch = db.batch()
-        operaciones_lote = 0
+        try:
 
-        for maestro in maestros_locales:
+            cursor = conexion.cursor()
 
-            identificador = str(
-                maestro.get("id", "")
-            ).strip()
+            migrados = 0
+            omitidos = 0
 
-            # Solo migrar identificadores MST válidos
-            if not es_id_maestro_valido(identificador):
+            for maestro in maestros_locales:
 
-                omitidos += 1
-                continue
+                identificador = str(
+                    maestro.get("id", "")
+                ).strip()
 
-            if identificador in documentos_actuales:
+                if not es_id_maestro_valido(
+                    identificador
+                ):
 
-                omitidos += 1
-                continue
+                    omitidos += 1
+                    continue
 
-            datos = maestro.copy()
-            datos["id"] = identificador
+                numero = convertir_id_a_numero(
+                    identificador
+                )
 
-            referencia = coleccion.document(identificador)
+                nombre = str(
+                    maestro.get("nombre", "")
+                ).strip()
 
-            batch.set(referencia, datos)
+                apellidos = str(
+                    maestro.get("apellidos", "")
+                ).strip()
 
-            migrados += 1
-            operaciones_lote += 1
+                if not nombre or not apellidos:
 
-            if operaciones_lote >= 450:
+                    omitidos += 1
+                    continue
 
-                batch.commit()
+                cursor.execute("""
+                    SELECT id_maestro
+                    FROM tblMaestros
+                    WHERE id_maestro = %s
+                """, (numero,))
 
-                batch = db.batch()
-                operaciones_lote = 0
+                if cursor.fetchone():
 
-        if operaciones_lote > 0:
-            batch.commit()
+                    omitidos += 1
+                    continue
+
+                estado = (
+                    "ACTIVO"
+                    if maestro.get("activo", True)
+                    else "INACTIVO"
+                )
+
+                cursor.execute("""
+                    INSERT INTO tblMaestros (
+                        id_maestro,
+                        nombre,
+                        apellido,
+                        estado
+                    )
+                    VALUES (%s, %s, %s, %s)
+                """, (
+                    numero,
+                    nombre,
+                    apellidos,
+                    estado
+                ))
+
+                migrados += 1
+
+            conexion.commit()
+
+        except Exception:
+
+            conexion.rollback()
+            raise
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            conexion.close()
 
         resultado = {
-
             "migrados": migrados,
             "omitidos": omitidos,
             "total_locales": len(maestros_locales)
-
         }
 
         print("Migración terminada.")
         print("Maestros migrados:", migrados)
         print("Maestros omitidos:", omitidos)
-        print("==========================================\n")
+        print("=======================================\n")
 
         return resultado
 

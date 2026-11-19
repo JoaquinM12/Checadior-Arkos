@@ -15,7 +15,10 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtCore import Qt, Signal
 
-from Servicios.ServicioAlmacenamiento import actualizar_maestro
+from Servicios.ServicioAlmacenamiento import (
+    actualizar_maestro,
+    buscar_maestro
+)
 
 
 class VisEditarMaestro(QWidget):
@@ -255,6 +258,7 @@ class VisEditarMaestro(QWidget):
 
         # CONEXIONES
         self.btn_guardar.clicked.connect(self.guardar)
+
         self.btn_cancelar.clicked.connect(
             self.cancelar_solicitado.emit
         )
@@ -312,7 +316,7 @@ class VisEditarMaestro(QWidget):
         )
 
         self.chk_activo.setChecked(
-            self.maestro.get("activo", True)
+            bool(self.maestro.get("activo", True))
         )
 
         self.actualizar_texto_estado(
@@ -327,11 +331,14 @@ class VisEditarMaestro(QWidget):
 
         if activo:
             self.lbl_estado_maestro.setText("Maestro activo")
+
             self.lbl_descripcion_estado.setText(
                 "El docente está habilitado en el sistema."
             )
+
         else:
             self.lbl_estado_maestro.setText("Maestro inactivo")
+
             self.lbl_descripcion_estado.setText(
                 "El docente no estará disponible para nuevas asignaciones."
             )
@@ -521,7 +528,7 @@ class VisEditarMaestro(QWidget):
         """)
 
     # ======================================================
-    # GUARDAR CAMBIOS
+    # GUARDAR CAMBIOS EN MYSQL
     # ======================================================
 
     def guardar(self):
@@ -564,20 +571,45 @@ class VisEditarMaestro(QWidget):
 
         try:
 
-            maestro_actualizado = actualizar_maestro(
-                self.maestro["id"],
+            id_maestro = self.maestro.get("id")
+
+            if not id_maestro:
+                raise ValueError(
+                    "No se encontró el identificador del maestro."
+                )
+
+            # ACTUALIZAR REGISTRO EN MYSQL
+            resultado = actualizar_maestro(
+                id_maestro,
                 nombre,
                 apellidos,
                 activo
             )
 
+            if not resultado:
+                raise Exception(
+                    "No se pudo actualizar el registro. "
+                    "Verifica que el maestro exista en MySQL."
+                )
+
+            # RECUPERAR LOS DATOS ACTUALIZADOS
+            maestro_actualizado = buscar_maestro(id_maestro)
+
+            if not maestro_actualizado:
+                raise Exception(
+                    "El registro se actualizó, pero no fue posible "
+                    "recuperar sus datos."
+                )
+
             QMessageBox.information(
                 self,
                 "Actualización exitosa",
-                "Los datos del maestro se actualizaron correctamente."
+                "Los datos del maestro se actualizaron correctamente en MySQL."
             )
 
-            self.maestro_actualizado.emit(maestro_actualizado)
+            self.maestro_actualizado.emit(
+                maestro_actualizado
+            )
 
         except Exception as error:
 
@@ -588,6 +620,7 @@ class VisEditarMaestro(QWidget):
             )
 
         finally:
+
             self.btn_guardar.setEnabled(True)
             self.btn_cancelar.setEnabled(True)
             self.btn_guardar.setText("Guardar cambios")

@@ -1,3 +1,7 @@
+# ==========================================================
+# ARKOS CHECADOR
+# Archivo: Vistas/VisChecador.py
+# ==========================================================
 
 import cv2
 import numpy as np
@@ -9,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QLabel,
     QPushButton,
+    QFrame,
     QVBoxLayout,
     QHBoxLayout,
     QMessageBox
@@ -70,50 +75,37 @@ class VisChecador(QWidget):
         self.camara = None
         self.contador_frames = 0
 
-        # Detector de parpadeo
         self.validador_parpadeo = DetectorParpadeo()
         self.parpadeo_confirmado = False
 
-        # Estabilidad de deteccion
         self.contador_detecciones = 0
         self.ultima_caja_detectada = None
         self.deteccion_confirmada = False
 
-        # Confirmacion de identidad
         self.ultimo_id_candidato = None
         self.confirmaciones = 0
 
         self.maestro_confirmado = None
         self.resultado_reconocimiento = None
 
-        # Anti-spoofing
         self.contador_rostro_real = 0
         self.ultimo_resultado_anti_spoof = None
 
-        # Resultado fallido
         self.mostrar_resultado_fallido = False
 
-        # Control de ventana de registro
         self.ventana_clase_abierta = False
 
-        # Evitar que la misma persona vuelva a abrir
-        # el registro sin retirar primero su rostro.
         self.esperando_retiro_rostro = False
 
-        # Fecha y hora capturadas al confirmar identidad
         self.fecha_hora_reconocimiento = None
 
-        # Temporizador para resultado fallido
         self.timer_resultado = QTimer(self)
         self.timer_resultado.setSingleShot(True)
-
         self.timer_resultado.timeout.connect(
             self.finalizar_intento_no_reconocido
         )
 
-        # ==================================================
-        # CARGAR MODELO YUNET
-        # ==================================================
+        # Cargar modelo YuNet
 
         ruta_proyecto = Path(__file__).resolve().parent.parent
 
@@ -141,12 +133,8 @@ class VisChecador(QWidget):
 
         self.crear_interfaz()
 
-        # Temporizador principal
         self.timer = QTimer(self)
-
-        self.timer.timeout.connect(
-            self.actualizar_frame
-        )
+        self.timer.timeout.connect(self.actualizar_frame)
 
     # ==================================================
     # INTERFAZ
@@ -154,122 +142,255 @@ class VisChecador(QWidget):
 
     def crear_interfaz(self):
 
-        layout = QVBoxLayout(self)
+        self.setWindowTitle("ARKOS | Checador facial")
+        self.setMinimumSize(1050, 650)
 
-        layout.setContentsMargins(30, 20, 30, 20)
-        layout.setSpacing(15)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #F3F6FA;
+                color: #172B4D;
+                font-family: Segoe UI;
+                font-size: 10pt;
+            }
 
-        titulo = QLabel("CHECADOR FACIAL ARKOS")
+            /* Evita que las etiquetas hereden el fondo general.
+               Esta regla elimina las franjas vacias que aparecian
+               detras de los textos. */
 
-        titulo.setAlignment(Qt.AlignCenter)
+            QLabel {
+                background-color: transparent;
+            }
 
-        titulo.setStyleSheet("""
-            font-size: 26px;
-            font-weight: bold;
-            color: #001F3F;
-        """)
+            QFrame#encabezado {
+                background-color: #001F3F;
+                border-radius: 14px;
+            }
 
-        self.lbl_camara = QLabel(
-            "La camara esta detenida"
-        )
+            QFrame#panelCamara,
+            QFrame#panelControl {
+                background-color: #FFFFFF;
+                border: 1px solid #DCE4EE;
+                border-radius: 14px;
+            }
 
-        self.lbl_camara.setAlignment(Qt.AlignCenter)
-        self.lbl_camara.setMinimumSize(640, 400)
+            QLabel#tituloPrincipal {
+                background-color: transparent;
+                color: #FFFFFF;
+                font-size: 21pt;
+                font-weight: 700;
+            }
 
-        self.lbl_camara.setStyleSheet("""
-            background-color: #1C1C1C;
-            color: white;
-            font-size: 20px;
-            border-radius: 10px;
-        """)
+            QLabel#subtitulo {
+                background-color: transparent;
+                color: #C8D8E8;
+                font-size: 9pt;
+            }
 
-        self.lbl_estado = QLabel(
-            "Esperando inicio de camara..."
-        )
+            QLabel#tituloPanel {
+                background-color: transparent;
+                color: #001F3F;
+                font-size: 12pt;
+                font-weight: 700;
+            }
 
-        self.lbl_estado.setAlignment(Qt.AlignCenter)
+            QLabel#camara {
+                background-color: #101820;
+                color: #DCE6F1;
+                border: 2px solid #243B53;
+                border-radius: 10px;
+                font-size: 13pt;
+            }
 
-        self.lbl_estado.setStyleSheet("""
-            font-size: 16px;
-            font-weight: bold;
-            color: #003B73;
-            padding: 5px;
-        """)
+            QLabel#estado {
+                background-color: #EAF2FA;
+                color: #003B73;
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 11pt;
+                font-weight: 700;
+            }
 
-        self.lbl_maestro = QLabel(
-            "Ningun maestro identificado"
-        )
+            QLabel#maestro {
+                background-color: #F5F8FC;
+                color: #001F3F;
+                border: 1px solid #E0E8F0;
+                border-radius: 8px;
+                padding: 14px;
+                font-size: 11pt;
+                font-weight: 600;
+            }
 
-        self.lbl_maestro.setAlignment(Qt.AlignCenter)
+            QLabel#nota {
+                background-color: transparent;
+                color: #66788A;
+                font-size: 9pt;
+            }
 
-        self.lbl_maestro.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            color: #001F3F;
-            padding: 10px;
-        """)
-
-        self.btn_iniciar = QPushButton(
-            "INICIAR CAMARA"
-        )
-
-        self.btn_iniciar.setMinimumHeight(45)
-
-        self.btn_iniciar.setStyleSheet("""
             QPushButton {
+                min-height: 44px;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }
+
+            QPushButton#btnIniciar {
                 background-color: #003B73;
                 color: white;
-                font-size: 15px;
-                font-weight: bold;
-                border-radius: 8px;
-                padding: 10px;
             }
 
-            QPushButton:hover {
-                background-color: #1677C8;
-            }
-        """)
-
-        self.btn_iniciar.clicked.connect(
-            self.iniciar_camara
-        )
-
-        self.btn_detener = QPushButton(
-            "DETENER CAMARA"
-        )
-
-        self.btn_detener.setMinimumHeight(45)
-
-        self.btn_detener.setStyleSheet("""
-            QPushButton {
-                background-color: #C0392B;
-                color: white;
-                font-size: 15px;
-                font-weight: bold;
-                border-radius: 8px;
-                padding: 10px;
+            QPushButton#btnIniciar:hover {
+                background-color: #075A9E;
             }
 
-            QPushButton:hover {
-                background-color: #E74C3C;
+            QPushButton#btnDetener {
+                background-color: #E9EEF4;
+                color: #34495E;
+                border: 1px solid #D3DDE7;
+            }
+
+            QPushButton#btnDetener:hover {
+                background-color: #DCE5EE;
+            }
+
+            QPushButton:disabled {
+                background-color: #DCE2E8;
+                color: #8995A1;
             }
         """)
 
-        self.btn_detener.clicked.connect(
-            self.detener_camara
+        layout_principal = QVBoxLayout(self)
+        layout_principal.setContentsMargins(22, 18, 22, 22)
+        layout_principal.setSpacing(16)
+
+        # ENCABEZADO
+
+        encabezado = QFrame()
+        encabezado.setObjectName("encabezado")
+
+        encabezado_layout = QVBoxLayout(encabezado)
+        encabezado_layout.setContentsMargins(22, 16, 22, 16)
+        encabezado_layout.setSpacing(4)
+
+        titulo = QLabel("ARKOS | CHECADOR FACIAL")
+        titulo.setObjectName("tituloPrincipal")
+
+        subtitulo = QLabel(
+            "Sistema de identificación y registro de clases"
         )
+        subtitulo.setObjectName("subtitulo")
 
-        botones = QHBoxLayout()
-        botones.setSpacing(15)
+        encabezado_layout.addWidget(titulo)
+        encabezado_layout.addWidget(subtitulo)
 
-        botones.addWidget(self.btn_iniciar)
-        botones.addWidget(self.btn_detener)
+        layout_principal.addWidget(encabezado)
 
-        layout.addWidget(titulo)
-        layout.addWidget(self.lbl_camara, 1)
-        layout.addWidget(self.lbl_estado)
-        layout.addWidget(self.lbl_maestro)
-        layout.addLayout(botones)
+        # CONTENIDO PRINCIPAL
+
+        contenido = QHBoxLayout()
+        contenido.setSpacing(16)
+
+        # PANEL DE CAMARA
+
+        panel_camara = QFrame()
+        panel_camara.setObjectName("panelCamara")
+
+        camara_layout = QVBoxLayout(panel_camara)
+        camara_layout.setContentsMargins(16, 16, 16, 16)
+        camara_layout.setSpacing(8)
+
+        titulo_camara = QLabel("Vista de cámara")
+        titulo_camara.setObjectName("tituloPanel")
+
+        self.lbl_camara = QLabel("La cámara está detenida")
+        self.lbl_camara.setObjectName("camara")
+        self.lbl_camara.setAlignment(Qt.AlignCenter)
+        self.lbl_camara.setMinimumSize(520, 380)
+        self.lbl_camara.setScaledContents(False)
+
+        nota_camara = QLabel(
+            "Colócate frente a la cámara y mantén el rostro visible."
+        )
+        nota_camara.setObjectName("nota")
+        nota_camara.setWordWrap(True)
+
+        camara_layout.addWidget(titulo_camara)
+        camara_layout.addWidget(self.lbl_camara, 1)
+        camara_layout.addWidget(nota_camara)
+
+        contenido.addWidget(panel_camara, 3)
+
+        # PANEL DE IDENTIFICACION
+
+        panel_control = QFrame()
+        panel_control.setObjectName("panelControl")
+
+        control_layout = QVBoxLayout(panel_control)
+        control_layout.setContentsMargins(18, 18, 18, 18)
+        control_layout.setSpacing(14)
+
+        titulo_control = QLabel("Panel de identificación")
+        titulo_control.setObjectName("tituloPanel")
+
+        descripcion = QLabel("Estado del proceso")
+        descripcion.setObjectName("nota")
+
+        self.lbl_estado = QLabel("Esperando inicio de cámara...")
+        self.lbl_estado.setObjectName("estado")
+        self.lbl_estado.setAlignment(Qt.AlignCenter)
+        self.lbl_estado.setWordWrap(True)
+        self.lbl_estado.setMinimumHeight(76)
+
+        etiqueta_maestro = QLabel("Maestro")
+        etiqueta_maestro.setObjectName("nota")
+
+        self.lbl_maestro = QLabel("Ningún maestro identificado")
+        self.lbl_maestro.setObjectName("maestro")
+        self.lbl_maestro.setAlignment(Qt.AlignCenter)
+        self.lbl_maestro.setWordWrap(True)
+        self.lbl_maestro.setMinimumHeight(105)
+
+        separador = QLabel("INSTRUCCIONES")
+        separador.setStyleSheet("""
+            background-color: transparent;
+            color: #003B73;
+            font-weight: 700;
+            font-size: 9pt;
+        """)
+
+        instrucciones = QLabel(
+            "1. Inicia la cámara.\n"
+            "2. Colócate frente a ella.\n"
+            "3. Realiza la prueba de vida.\n"
+            "4. Espera la confirmación de identidad."
+        )
+        instrucciones.setObjectName("nota")
+        instrucciones.setWordWrap(True)
+
+        self.btn_iniciar = QPushButton("INICIAR CÁMARA")
+        self.btn_iniciar.setObjectName("btnIniciar")
+        self.btn_iniciar.clicked.connect(self.iniciar_camara)
+
+        self.btn_detener = QPushButton("DETENER CÁMARA")
+        self.btn_detener.setObjectName("btnDetener")
+        self.btn_detener.clicked.connect(self.detener_camara)
+        self.btn_detener.setEnabled(False)
+
+        control_layout.addWidget(titulo_control)
+        control_layout.addWidget(descripcion)
+        control_layout.addWidget(self.lbl_estado)
+        control_layout.addWidget(etiqueta_maestro)
+        control_layout.addWidget(self.lbl_maestro)
+        control_layout.addSpacing(8)
+        control_layout.addWidget(separador)
+        control_layout.addWidget(instrucciones)
+        control_layout.addStretch(1)
+        control_layout.addWidget(self.btn_iniciar)
+        control_layout.addWidget(self.btn_detener)
+
+        contenido.addWidget(panel_control, 2)
+
+        layout_principal.addLayout(contenido, 1)
 
     # ==================================================
     # REINICIAR ESTABILIDAD
@@ -330,17 +451,13 @@ class VisChecador(QWidget):
 
         self.mostrar_resultado_fallido = True
 
-        self.lbl_estado.setText(
-            "IDENTIDAD NO CONFIRMADA"
-        )
+        self.lbl_estado.setText("IDENTIDAD NO CONFIRMADA")
 
         self.lbl_maestro.setText(
             mensaje or "MAESTRO NO RECONOCIDO"
         )
 
-        print(
-            "[CHECADOR] Maestro no reconocido."
-        )
+        print("[CHECADOR] Maestro no reconocido.")
 
         self.timer_resultado.start(
             self.TIEMPO_RESULTADO_FALLIDO
@@ -353,6 +470,7 @@ class VisChecador(QWidget):
     def finalizar_intento_no_reconocido(self):
 
         if self.camara is None:
+
             self.mostrar_resultado_fallido = False
             return
 
@@ -360,9 +478,7 @@ class VisChecador(QWidget):
 
         self.reiniciar_proceso()
 
-        self.lbl_estado.setText(
-            "PRUEBA DE VIDA (PARPADEO)"
-        )
+        self.lbl_estado.setText("PRUEBA DE VIDA (PARPADEO)")
 
         self.lbl_maestro.setText(
             "Por favor, parpadee frente a la camara..."
@@ -504,15 +620,16 @@ class VisChecador(QWidget):
 
         self.timer_resultado.stop()
 
-        self.lbl_estado.setText(
-            "Buscando rostro..."
-        )
+        self.lbl_estado.setText("Buscando rostro...")
 
         self.lbl_maestro.setText(
             "Esperando identificacion..."
         )
 
         self.timer.start(30)
+
+        self.btn_iniciar.setEnabled(False)
+        self.btn_detener.setEnabled(True)
 
     # ==================================================
     # FILTRO DE CALIDAD FACIAL
@@ -700,9 +817,7 @@ class VisChecador(QWidget):
 
             return
 
-        maestro_id = resultado.get(
-            "maestro_id"
-        )
+        maestro_id = resultado.get("maestro_id")
 
         if not maestro_id:
 
@@ -730,8 +845,8 @@ class VisChecador(QWidget):
             self.maestro_confirmado = resultado
             self.resultado_reconocimiento = resultado
 
-            # CAPTURAR LA HORA EN ESTE MOMENTO.
-            # No se vuelve a calcular al guardar los temas.
+            # Capturar la hora al confirmar la identidad.
+
             self.fecha_hora_reconocimiento = datetime.now()
 
             self.lbl_estado.setText(
@@ -786,6 +901,7 @@ class VisChecador(QWidget):
         self.ventana_clase_abierta = True
 
         # Detener el análisis para impedir otro reconocimiento.
+
         self.timer.stop()
 
         try:
@@ -794,16 +910,14 @@ class VisChecador(QWidget):
                 self.fecha_hora_reconocimiento
             )
 
-            # ------------------------------------------
-            # BUSCAR DATOS DEL MAESTRO EN FIREBASE
-            # ------------------------------------------
+            # BUSCAR DATOS DEL MAESTRO EN MYSQL
 
             maestro = buscar_maestro(maestro_id)
 
             if not maestro:
 
                 raise ValueError(
-                    "No se encontraron los datos del maestro en Firebase."
+                    "No se encontraron los datos del maestro en MySQL."
                 )
 
             if not maestro.get("activo", True):
@@ -819,9 +933,7 @@ class VisChecador(QWidget):
 
             maestro["nombre"] = nombre_completo
 
-            # ------------------------------------------
             # BUSCAR CLASE VIGENTE
-            # ------------------------------------------
 
             horario = obtener_clase_actual(
                 maestro_id,
@@ -843,9 +955,7 @@ class VisChecador(QWidget):
 
                 return
 
-            # ------------------------------------------
             # VERIFICAR SI YA EXISTE LA ASISTENCIA
-            # ------------------------------------------
 
             registro_existente = buscar_registro_clase(
                 maestro_id,
@@ -865,9 +975,7 @@ class VisChecador(QWidget):
 
                 return
 
-            # ------------------------------------------
             # ABRIR VENTANA DE REGISTRO
-            # ------------------------------------------
 
             ventana = VisRegistroClase(
                 maestro=maestro,
@@ -922,10 +1030,10 @@ class VisChecador(QWidget):
 
             # Exigir que el maestro retire su rostro
             # antes de comenzar un nuevo reconocimiento.
+
             self.esperando_retiro_rostro = True
 
             if self.camara is not None:
-
                 self.timer.start(30)
 
     # ==================================================
@@ -947,14 +1055,11 @@ class VisChecador(QWidget):
             1
         )
 
-        # ==============================================
         # PAUSA PARA RESULTADO NO RECONOCIDO
-        # ==============================================
 
         if self.mostrar_resultado_fallido:
 
             self._mostrar_frame_en_interfaz(frame)
-
             return
 
         alto, ancho = frame.shape[:2]
@@ -972,9 +1077,7 @@ class VisChecador(QWidget):
 
         cantidad = len(rostros)
 
-        # ==============================================
         # ESPERAR A QUE EL MAESTRO RETIRE SU ROSTRO
-        # ==============================================
 
         if self.esperando_retiro_rostro:
 
@@ -989,7 +1092,6 @@ class VisChecador(QWidget):
                 )
 
                 self._mostrar_frame_en_interfaz(frame)
-
                 return
 
             else:
@@ -1006,9 +1108,7 @@ class VisChecador(QWidget):
                     "Esperando identificacion..."
                 )
 
-        # ==============================================
         # NINGUN ROSTRO
-        # ==============================================
 
         if cantidad == 0:
 
@@ -1022,9 +1122,7 @@ class VisChecador(QWidget):
                 "Colocate frente a la camara."
             )
 
-        # ==============================================
         # VARIOS ROSTROS
-        # ==============================================
 
         elif cantidad > 1:
 
@@ -1063,9 +1161,7 @@ class VisChecador(QWidget):
                     2
                 )
 
-        # ==============================================
         # UN SOLO ROSTRO
-        # ==============================================
 
         else:
 
@@ -1080,9 +1176,7 @@ class VisChecador(QWidget):
                 rostro[14]
             )
 
-            # ==========================================
             # VALIDAR CONFIANZA
-            # ==========================================
 
             if (
                 confianza_detector
@@ -1101,9 +1195,7 @@ class VisChecador(QWidget):
 
             else:
 
-                # ======================================
                 # VALIDAR CALIDAD
-                # ======================================
 
                 calidad_correcta, mensaje = (
                     self.validar_calidad_rostro(
@@ -1129,9 +1221,7 @@ class VisChecador(QWidget):
 
                 else:
 
-                    # ==================================
                     # CONFIRMAR ESTABILIDAD
-                    # ==================================
 
                     deteccion_estable = (
                         self.confirmar_deteccion(
@@ -1162,9 +1252,7 @@ class VisChecador(QWidget):
 
                         self.contador_frames += 1
 
-                        # ==================================
                         # 1. EVALUAR PARPADEO
-                        # ==================================
 
                         if not self.parpadeo_confirmado:
 
@@ -1210,9 +1298,7 @@ class VisChecador(QWidget):
 
                                 return
 
-                        # ==================================
                         # 2. EJECUTAR ANTI-SPOOFING
-                        # ==================================
 
                         if (
                             self.contador_frames
@@ -1229,9 +1315,7 @@ class VisChecador(QWidget):
                                 )
                             )
 
-                            # ==================================
                             # 3. EJECUTAR RECONOCIMIENTO
-                            # ==================================
 
                             if seguridad_validada:
 
@@ -1239,9 +1323,7 @@ class VisChecador(QWidget):
                                     frame_original
                                 )
 
-                        # ==================================
                         # DIBUJAR RECUADRO
-                        # ==================================
 
                         if not deteccion_estable:
 
@@ -1326,7 +1408,6 @@ class VisChecador(QWidget):
     def detener_camara(self):
 
         self.timer.stop()
-
         self.timer_resultado.stop()
 
         self.mostrar_resultado_fallido = False
@@ -1354,6 +1435,9 @@ class VisChecador(QWidget):
         self.lbl_maestro.setText(
             "Ningun maestro identificado"
         )
+
+        self.btn_iniciar.setEnabled(True)
+        self.btn_detener.setEnabled(False)
 
     # ==================================================
     # CERRAR APLICACION
