@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QComboBox,
+    QCompleter,
     QTimeEdit,
     QPushButton,
     QTableWidget,
@@ -276,11 +277,34 @@ class VisHorarios(QWidget):
 
         self.combo_maestro = QComboBox()
         self.combo_maestro.setMinimumHeight(40)
+        self.combo_maestro.setEditable(True)
+        self.combo_maestro.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.combo_maestro.setPlaceholderText(
+            "Escribe el nombre o número del maestro para buscar"
+        )
+        buscador_maestros = QCompleter(self.combo_maestro.model(), self)
+        buscador_maestros.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        buscador_maestros.setFilterMode(Qt.MatchFlag.MatchContains)
+        buscador_maestros.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.combo_maestro.setCompleter(buscador_maestros)
 
         self.combo_materia = QComboBox()
         self.combo_materia.setMinimumHeight(40)
+        self.combo_materia.setEditable(True)
+        self.combo_materia.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.combo_materia.setPlaceholderText(
+            "Escribe materia, carrera o cuatrimestre para buscar"
+        )
+        buscador_materias = QCompleter(self.combo_materia.model(), self)
+        buscador_materias.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        buscador_materias.setFilterMode(Qt.MatchFlag.MatchContains)
+        buscador_materias.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.combo_materia.setCompleter(buscador_materias)
 
         self.combo_materia.currentIndexChanged.connect(
+            self.actualizar_informacion_materia
+        )
+        self.combo_materia.editTextChanged.connect(
             self.actualizar_informacion_materia
         )
 
@@ -345,11 +369,17 @@ class VisHorarios(QWidget):
         self.hora_inicio.setDisplayFormat("HH:mm")
         self.hora_inicio.setTime(QTime(17, 0))
         self.hora_inicio.setMinimumHeight(40)
+        self.hora_inicio.setMinimumWidth(125)
+        self.hora_inicio.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hora_inicio.setToolTip("Selecciona la hora de inicio de la clase")
 
         self.hora_fin = QTimeEdit()
         self.hora_fin.setDisplayFormat("HH:mm")
         self.hora_fin.setTime(QTime(19, 0))
         self.hora_fin.setMinimumHeight(40)
+        self.hora_fin.setMinimumWidth(125)
+        self.hora_fin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hora_fin.setToolTip("Selecciona la hora de fin de la clase")
 
         campos_horario.addWidget(etiqueta_dia, 0, 0)
         campos_horario.addWidget(etiqueta_inicio, 0, 1)
@@ -814,8 +844,7 @@ class VisHorarios(QWidget):
                 border-radius: 11px;
             }
 
-            QComboBox,
-            QTimeEdit {
+            QComboBox {
                 color: #1E293B;
                 background-color: #F8FAFC;
                 border: 1px solid #CBD5E1;
@@ -824,8 +853,22 @@ class VisHorarios(QWidget):
                 font-size: 12px;
             }
 
-            QComboBox:focus,
+            QTimeEdit {
+                color: #003B73;
+                background-color: #FFFFFF;
+                border: 1px solid #B8C9DB;
+                border-radius: 8px;
+                padding: 7px 12px;
+                font-size: 15px;
+                font-weight: 700;
+            }
+
             QTimeEdit:focus {
+                border: 2px solid #1677C8;
+                background-color: #FFFFFF;
+            }
+
+            QComboBox:focus {
                 border: 1px solid #1677C8;
                 background-color: #FFFFFF;
             }
@@ -1117,7 +1160,7 @@ class VisHorarios(QWidget):
 
     def actualizar_informacion_materia(self, indice=None):
 
-        identificador = self.combo_materia.currentData()
+        identificador = self.obtener_id_materia_seleccionada()
 
         materia = next(
             (
@@ -1141,6 +1184,28 @@ class VisHorarios(QWidget):
         self.lbl_cuatrimestre.setText(
             materia.get("cuatrimestre", "")
         )
+
+    def obtener_id_materia_seleccionada(self):
+        """Devuelve el ID solo si el texto corresponde a una materia real."""
+        texto = self.combo_materia.currentText().strip()
+        indice = self.combo_materia.findText(
+            texto,
+            Qt.MatchFlag.MatchFixedString
+        )
+        if indice < 0:
+            return None
+        return self.combo_materia.itemData(indice)
+
+    def obtener_id_maestro_seleccionado(self):
+        """Devuelve el ID solo si el texto corresponde a un maestro real."""
+        texto = self.combo_maestro.currentText().strip()
+        indice = self.combo_maestro.findText(
+            texto,
+            Qt.MatchFlag.MatchFixedString
+        )
+        if indice < 0:
+            return None
+        return self.combo_maestro.itemData(indice)
 
     # ======================================================
     # VALIDAR HORAS
@@ -1253,8 +1318,8 @@ class VisHorarios(QWidget):
 
     def registrar_horario(self):
 
-        id_maestro = self.combo_maestro.currentData()
-        id_materia = self.combo_materia.currentData()
+        id_maestro = self.obtener_id_maestro_seleccionado()
+        id_materia = self.obtener_id_materia_seleccionada()
 
         if not id_maestro:
 
@@ -1761,8 +1826,8 @@ class VisHorarios(QWidget):
 
             return
 
-        id_maestro = self.combo_maestro.currentData()
-        id_materia = self.combo_materia.currentData()
+        id_maestro = self.obtener_id_maestro_seleccionado()
+        id_materia = self.obtener_id_materia_seleccionada()
 
         if not id_maestro or not id_materia:
 

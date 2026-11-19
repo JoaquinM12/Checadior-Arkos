@@ -396,7 +396,8 @@ def buscar_registro_clase(
             WHERE
                 ci.id_maestro = %s
                 AND ci.id_horario = %s
-                AND DATE(ci.fecha) = %s
+                AND ci.fecha >= %s
+                AND ci.fecha < %s
 
             LIMIT 1
         """
@@ -406,7 +407,8 @@ def buscar_registro_clase(
             (
                 id_maestro_sql,
                 id_horario_sql,
-                fecha_hora.date()
+                fecha_hora.date(),
+                fecha_hora.date() + timedelta(days=1)
             )
         )
 
@@ -542,13 +544,15 @@ def registrar_clase_impartida(
             WHERE
                 id_maestro = %s
                 AND id_horario = %s
-                AND DATE(fecha) = %s
+                AND fecha >= %s
+                AND fecha < %s
             LIMIT 1
             """,
             (
                 id_maestro_sql,
                 id_horario_sql,
-                fecha_hora_reconocimiento.date()
+                fecha_hora_reconocimiento.date(),
+                fecha_hora_reconocimiento.date() + timedelta(days=1)
             )
         )
 

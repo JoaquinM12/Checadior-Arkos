@@ -35,6 +35,7 @@ from Vistas.VisEditarMaestro import VisEditarMaestro
 from Vistas.VisHorarios import VisHorarios
 from Vistas.VisMaterias import VisMaterias
 from Vistas.VisAsistencias import VisAsistencias
+from Vistas.VisControlDiario import VisControlDiario
 from Vistas.VisReportes import VisReportes
 from Vistas.VisRetardos import VisRetardos
 from Vistas.VisFaltas import VisFaltas
@@ -88,8 +89,10 @@ class VisInicio(QWidget):
 
         self.indicadores = {}
         self.tarjetas_indicadores = []
+        self._columnas_indicadores = None
 
         self.botones_menu = {}
+        self._tamano_fuente_hora = None
 
         self.crear_interfaz()
 
@@ -141,6 +144,11 @@ class VisInicio(QWidget):
 
         columnas = 1 if ancho < 650 else 2
 
+        if columnas == self._columnas_indicadores:
+            return
+
+        self._columnas_indicadores = columnas
+
         while self.grid_indicadores.count():
 
             elemento = self.grid_indicadores.takeAt(0)
@@ -179,16 +187,10 @@ class VisInicio(QWidget):
 
         if ancho < 750:
 
+            tamano_fuente_hora = 18
+
             self.tarjeta_reloj.setMinimumWidth(160)
             self.tarjeta_reloj.setMaximumWidth(195)
-
-            self.lbl_hora.setStyleSheet("""
-                color: #003B73;
-                font-size: 18px;
-                font-weight: bold;
-                background: transparent;
-                border: none;
-            """)
 
             self.boton_checador.setMinimumWidth(135)
 
@@ -203,16 +205,10 @@ class VisInicio(QWidget):
 
         elif ancho < 1100:
 
+            tamano_fuente_hora = 21
+
             self.tarjeta_reloj.setMinimumWidth(205)
             self.tarjeta_reloj.setMaximumWidth(230)
-
-            self.lbl_hora.setStyleSheet("""
-                color: #003B73;
-                font-size: 21px;
-                font-weight: bold;
-                background: transparent;
-                border: none;
-            """)
 
             self.boton_checador.setMinimumWidth(155)
 
@@ -227,16 +223,10 @@ class VisInicio(QWidget):
 
         else:
 
+            tamano_fuente_hora = 23
+
             self.tarjeta_reloj.setMinimumWidth(235)
             self.tarjeta_reloj.setMaximumWidth(270)
-
-            self.lbl_hora.setStyleSheet("""
-                color: #003B73;
-                font-size: 23px;
-                font-weight: bold;
-                background: transparent;
-                border: none;
-            """)
 
             self.boton_checador.setMinimumWidth(175)
 
@@ -248,6 +238,16 @@ class VisInicio(QWidget):
 
             self.banner.setMinimumHeight(135)
             self.banner.setMaximumHeight(155)
+
+        if self._tamano_fuente_hora != tamano_fuente_hora:
+            self.lbl_hora.setStyleSheet(f"""
+                color: #003B73;
+                font-size: {tamano_fuente_hora}px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            """)
+            self._tamano_fuente_hora = tamano_fuente_hora
 
         self.actualizar_distribucion_indicadores()
 
@@ -465,6 +465,15 @@ class VisInicio(QWidget):
         )
 
         # ==================================================
+        # CONTROL DIARIO
+        # ==================================================
+
+        self.pagina_control_diario = VisControlDiario()
+        self.indices["Control diario"] = self.paginas.addWidget(
+            self.pagina_control_diario
+        )
+
+        # ==================================================
         # REPORTES
         # ==================================================
 
@@ -537,6 +546,7 @@ class VisInicio(QWidget):
             "Materias",
             "Horarios",
             "Asistencias",
+            "Control diario",
             "Retardos",
             "Faltas",
             "Reportes",
@@ -1418,6 +1428,10 @@ class VisInicio(QWidget):
             elif nombre == "Asistencias":
 
                 self.pagina_asistencias.cargar_datos()
+
+            elif nombre == "Control diario":
+
+                self.pagina_control_diario.cargar_datos()
 
             elif nombre not in self.indices:
 

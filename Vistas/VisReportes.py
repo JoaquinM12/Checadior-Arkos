@@ -95,6 +95,26 @@ class VisReportes(QWidget):
                 font-weight: 900;
             }
 
+            QLabel#iconoReporte[tipo="AS"] {
+                background: #E5F1FB;
+                color: #17618F;
+            }
+
+            QLabel#iconoReporte[tipo="RE"] {
+                background: #FFF1E2;
+                color: #B96815;
+            }
+
+            QLabel#iconoReporte[tipo="FA"] {
+                background: #FDEBEC;
+                color: #B6424B;
+            }
+
+            QLabel#iconoReporte[tipo="DO"] {
+                background: #E9F5EE;
+                color: #28734C;
+            }
+
             QLabel#tituloTarjetaReporte {
                 color: #143858;
                 font-size: 12pt;
@@ -130,6 +150,13 @@ class VisReportes(QWidget):
             QLabel#textoResumen {
                 color: #718096;
                 font-size: 9pt;
+            }
+
+            QLabel#marcaResumen {
+                background: #EAF1F7;
+                color: #17466D;
+                border-radius: 14px;
+                font-weight: 800;
             }
         """)
 
@@ -207,8 +234,7 @@ class VisReportes(QWidget):
         fila.addWidget(insignia, 0, Qt.AlignVCenter)
         return hero
 
-    def crear_tarjeta_reporte(self, iniciales, titulo, descripcion,
-                              fondo_icono, color_icono):
+    def crear_tarjeta_reporte(self, iniciales, titulo, descripcion):
         tarjeta = QFrame()
         tarjeta.setObjectName("tarjetaReporte")
         tarjeta.setMinimumHeight(172)
@@ -220,11 +246,9 @@ class VisReportes(QWidget):
         fila = QHBoxLayout()
         icono = QLabel(iniciales)
         icono.setObjectName("iconoReporte")
+        icono.setProperty("tipo", iniciales)
         icono.setAlignment(Qt.AlignCenter)
         icono.setFixedSize(42, 42)
-        icono.setStyleSheet(
-            f"background:{fondo_icono}; color:{color_icono};"
-        )
         fila.addWidget(icono)
         fila.addStretch(1)
 
@@ -269,14 +293,10 @@ class VisReportes(QWidget):
         tarjetas.setColumnStretch(1, 1)
 
         elementos = [
-            ("AS", "Asistencia", "Resumen de registros de asistencia.",
-             "#E5F1FB", "#17618F"),
-            ("RE", "Retardos", "Vista de puntualidad y llegadas tardías.",
-             "#FFF1E2", "#B96815"),
-            ("FA", "Faltas", "Resumen de incidencias y ausencias.",
-             "#FDEBEC", "#B6424B"),
-            ("DO", "Personal docente", "Información general del personal.",
-             "#E9F5EE", "#28734C"),
+            ("AS", "Asistencia", "Resumen de registros de asistencia."),
+            ("RE", "Retardos", "Vista de puntualidad y llegadas tardías."),
+            ("FA", "Faltas", "Resumen de incidencias y ausencias."),
+            ("DO", "Personal docente", "Información general del personal."),
         ]
 
         for indice, datos in enumerate(elementos):
@@ -297,12 +317,9 @@ class VisReportes(QWidget):
         layout.setSpacing(12)
 
         marca = QLabel("i")
+        marca.setObjectName("marcaResumen")
         marca.setAlignment(Qt.AlignCenter)
         marca.setFixedSize(28, 28)
-        marca.setStyleSheet(
-            "background:#EAF1F7; color:#17466D; border-radius:14px; "
-            "font-weight:800;"
-        )
 
         textos = QVBoxLayout()
         textos.setSpacing(3)

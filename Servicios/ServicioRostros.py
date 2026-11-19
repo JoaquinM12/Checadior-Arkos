@@ -60,11 +60,9 @@ def contar_fotografias(maestro_id):
 
     carpeta = obtener_carpeta_maestro(maestro_id)
 
-    fotografias = list(
-        carpeta.glob("rostro_*.jpg")
+    return sum(
+        1 for _ in carpeta.glob("rostro_*.jpg")
     )
-
-    return len(fotografias)
 
 
 # =====================================
@@ -78,11 +76,9 @@ def guardar_fotografia_rostro(maestro_id, imagen):
 
     carpeta = obtener_carpeta_maestro(maestro_id)
 
-    existentes = list(
-        carpeta.glob("rostro_*.jpg")
-    )
-
-    numero = len(existentes) + 1
+    numero = sum(
+        1 for _ in carpeta.glob("rostro_*.jpg")
+    ) + 1
 
     ruta_imagen = (
         carpeta /

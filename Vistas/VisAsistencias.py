@@ -494,12 +494,12 @@ class VisAsistencias(QWidget):
         self.tabla.setSortingEnabled(False)
         self.tabla.clearSelection()
         self.tabla.setCurrentCell(-1, -1)
-        self.tabla.setRowCount(0)
+        self.tabla.setRowCount(len(registros))
 
         asistencias = 0
         retardos = 0
 
-        for registro in registros:
+        for fila, registro in enumerate(registros):
 
             estado = str(
                 registro.get("estado", "") or ""
@@ -510,10 +510,6 @@ class VisAsistencias(QWidget):
 
             elif estado == "RETARDO":
                 retardos += 1
-
-            fila = self.tabla.rowCount()
-
-            self.tabla.insertRow(fila)
 
             nombre = (
                 f"{registro.get('nombre', '')} "
@@ -538,6 +534,15 @@ class VisAsistencias(QWidget):
 
             horario = f"{hora_inicio} - {hora_fin}"
 
+            observaciones_completas = str(
+                registro.get("observaciones") or ""
+            ).strip()
+            observaciones_tabla = " · ".join(
+                linea.strip()
+                for linea in observaciones_completas.splitlines()
+                if linea.strip()
+            )
+
             valores = [
                 registro.get("id_clase", ""),
                 nombre,
@@ -547,7 +552,7 @@ class VisAsistencias(QWidget):
                 horario,
                 hora_asistencia,
                 estado,
-                registro.get("observaciones") or ""
+                observaciones_tabla
             ]
 
             for columna, valor in enumerate(valores):
@@ -557,6 +562,9 @@ class VisAsistencias(QWidget):
                 item.setTextAlignment(
                     Qt.AlignmentFlag.AlignVCenter
                 )
+
+                if columna == 8 and observaciones_completas:
+                    item.setToolTip(observaciones_completas)
 
                 if columna in (0, 3, 4, 5, 6, 7):
 

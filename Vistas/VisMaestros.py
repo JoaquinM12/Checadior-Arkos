@@ -24,7 +24,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
-from Servicios.ServicioAlmacenamiento import cargar_maestros
+from Servicios.ServicioAlmacenamiento import (
+    cargar_maestros,
+    eliminar_maestro as borrar_maestro,
+)
 
 
 class VisMaestros(QWidget):
@@ -370,8 +373,13 @@ class VisMaestros(QWidget):
 
         self.btn_editar = QPushButton("Editar maestro")
         self.btn_rostro = QPushButton("Registrar rostro")
+        self.btn_eliminar = QPushButton("Eliminar maestro")
 
-        for boton in (self.btn_editar, self.btn_rostro):
+        for boton in (
+            self.btn_editar,
+            self.btn_rostro,
+            self.btn_eliminar,
+        ):
             boton.setMinimumHeight(39)
             boton.setMinimumWidth(145)
             boton.setCursor(Qt.PointingHandCursor)
@@ -420,8 +428,31 @@ class VisMaestros(QWidget):
             }
         """)
 
+        self.btn_eliminar.setStyleSheet("""
+            QPushButton {
+                background-color: #FEF2F2;
+                color: #B42318;
+                border: 1px solid #FECACA;
+                border-radius: 7px;
+                padding: 0px 14px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            QPushButton:hover {
+                background-color: #FEE2E2;
+            }
+
+            QPushButton:disabled {
+                background-color: #F1F5F9;
+                color: #94A3B8;
+                border: 1px solid #E2E8F0;
+            }
+        """)
+
         layout_acciones.addWidget(self.btn_editar)
         layout_acciones.addWidget(self.btn_rostro)
+        layout_acciones.addWidget(self.btn_eliminar)
 
         layout_principal.addWidget(contenedor_acciones)
 
@@ -443,6 +474,10 @@ class VisMaestros(QWidget):
             self.abrir_registro_rostro
         )
 
+        self.btn_eliminar.clicked.connect(
+            self.eliminar_maestro_seleccionado
+        )
+
         self.txt_buscar.textChanged.connect(
             self.filtrar_maestros
         )
@@ -453,6 +488,7 @@ class VisMaestros(QWidget):
 
         self.btn_editar.setEnabled(False)
         self.btn_rostro.setEnabled(False)
+        self.btn_eliminar.setEnabled(False)
 
     # =====================================================
     # TARJETAS DE INDICADORES
@@ -719,6 +755,7 @@ class VisMaestros(QWidget):
         self.btn_rostro.setEnabled(
             seleccionado and maestro.get("activo", True)
         )
+        self.btn_eliminar.setEnabled(seleccionado)
 
         if seleccionado:
 
@@ -790,3 +827,55 @@ class VisMaestros(QWidget):
             "nombre": maestro.get("nombre"),
             "apellidos": maestro.get("apellidos")
         })
+
+    def eliminar_maestro_seleccionado(self):
+
+        maestro = self.obtener_maestro_seleccionado()
+        if maestro is None:
+            QMessageBox.warning(
+                self,
+                "Selecciona un maestro",
+                "Primero debes seleccionar un maestro de la tabla."
+            )
+            return
+
+        nombre = f"{maestro.get('nombre', '')} {maestro.get('apellidos', '')}".strip()
+        confirmacion = QMessageBox(self)
+        confirmacion.setIcon(QMessageBox.Icon.Warning)
+        confirmacion.setWindowTitle("Eliminar maestro")
+        confirmacion.setText(f"¿Deseas eliminar a {nombre}?")
+        confirmacion.setInformativeText(
+            "La eliminación es permanente. Si tiene horarios o historial "
+            "de asistencias, el sistema protegerá esos datos y no permitirá "
+            "borrarlo."
+        )
+        boton_eliminar = confirmacion.addButton(
+            "Eliminar",
+            QMessageBox.ButtonRole.DestructiveRole
+        )
+        boton_cancelar = confirmacion.addButton(
+            "Cancelar",
+            QMessageBox.ButtonRole.RejectRole
+        )
+        confirmacion.setDefaultButton(boton_cancelar)
+        confirmacion.exec()
+
+        if confirmacion.clickedButton() != boton_eliminar:
+            return
+
+        try:
+            borrar_maestro(maestro.get("id"))
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                "No se pudo eliminar",
+                str(error)
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Maestro eliminado",
+            f"{nombre} se eliminó correctamente."
+        )
+        self.actualizar_lista()

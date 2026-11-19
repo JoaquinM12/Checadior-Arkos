@@ -37,6 +37,7 @@ class VisRostros(QWidget):
 
         self.procesando = False
         self.registro_completado = False
+        self.cantidad_fotografias = 0
 
         self.detector_rostros = None
 
@@ -291,12 +292,13 @@ class VisRostros(QWidget):
 
     def actualizar_contador(self):
 
-        cantidad = contar_fotografias(
+        self.cantidad_fotografias = contar_fotografias(
             self.maestro["id"]
         )
 
         self.lbl_contador.setText(
-            f"Fotografías: {cantidad} / {self.MAX_FOTOGRAFIAS}"
+            f"Fotografías: {self.cantidad_fotografias} / "
+            f"{self.MAX_FOTOGRAFIAS}"
         )
 
         self.actualizar_estado_botones()
@@ -309,9 +311,7 @@ class VisRostros(QWidget):
 
         autorizado = self.chk_autorizacion.isChecked()
 
-        cantidad = contar_fotografias(
-            self.maestro["id"]
-        )
+        cantidad = self.cantidad_fotografias
 
         self.btn_iniciar.setEnabled(
             autorizado
@@ -524,6 +524,7 @@ class VisRostros(QWidget):
         cantidad = contar_fotografias(
             self.maestro["id"]
         )
+        self.cantidad_fotografias = cantidad
 
         if cantidad >= self.MAX_FOTOGRAFIAS:
             self.detener_camara()
@@ -570,9 +571,7 @@ class VisRostros(QWidget):
                 "Fotografía guardada correctamente."
             )
 
-            if contar_fotografias(
-                self.maestro["id"]
-            ) >= self.MAX_FOTOGRAFIAS:
+            if self.cantidad_fotografias >= self.MAX_FOTOGRAFIAS:
 
                 self.detener_camara()
 
@@ -605,6 +604,7 @@ class VisRostros(QWidget):
         cantidad = contar_fotografias(
             self.maestro["id"]
         )
+        self.cantidad_fotografias = cantidad
 
         if cantidad != self.MAX_FOTOGRAFIAS:
 

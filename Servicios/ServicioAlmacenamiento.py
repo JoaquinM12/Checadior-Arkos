@@ -1,6 +1,8 @@
 
 from pathlib import Path
 from datetime import datetime
+import json
+import shutil
 
 from Configuracion.ConexionMySQL import obtener_conexion
 
@@ -499,6 +501,85 @@ def actualizar_maestro(
             cursor.close()
 
         conexion.close()
+
+
+def eliminar_maestro(id_maestro):
+    """Elimina un maestro solo si no tiene horarios ni historial asociado."""
+
+    if not es_id_maestro_valido(id_maestro):
+        raise ValueError("El identificador del maestro no es válido.")
+
+    id_texto = str(id_maestro).strip().upper()
+    numero = convertir_id_a_numero(id_texto)
+    conexion = obtener_conexion()
+
+    if conexion is None:
+        raise ConnectionError("No fue posible conectar con MySQL.")
+
+    cursor = None
+
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT id_maestro FROM tblMaestros "
+            "WHERE id_maestro = %s FOR UPDATE",
+            (numero,)
+        )
+        if not cursor.fetchone():
+            raise ValueError("No se encontró el maestro seleccionado.")
+
+        dependencias = {}
+        for tabla in ("tblHorarios", "tblClasesImpartidas", "tblFaltas"):
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {tabla} WHERE id_maestro = %s",
+                (numero,)
+            )
+            dependencias[tabla] = cursor.fetchone()[0]
+
+        if any(dependencias.values()):
+            raise ValueError(
+                "No se puede borrar definitivamente a este maestro porque "
+                "tiene horarios o registros de asistencia/faltas asociados. "
+                "Para conservar el historial, márcalo como inactivo desde "
+                "Editar maestro."
+            )
+
+        cursor.execute(
+            "DELETE FROM tblMaestros WHERE id_maestro = %s",
+            (numero,)
+        )
+        conexion.commit()
+
+    except Exception:
+        conexion.rollback()
+        raise
+
+    finally:
+        if cursor:
+            cursor.close()
+        conexion.close()
+
+    # Eliminar los datos biométricos locales del maestro ya eliminado.
+    carpeta_rostros = RUTA_DATOS / "Rostros" / id_texto
+    try:
+        if carpeta_rostros.exists():
+            shutil.rmtree(carpeta_rostros)
+    except OSError as error:
+        print("No se pudo eliminar la carpeta facial:", error)
+
+    archivo_embeddings = RUTA_DATOS / "embeddings_rostros.json"
+    try:
+        if archivo_embeddings.exists():
+            with archivo_embeddings.open("r", encoding="utf-8") as archivo:
+                embeddings = json.load(archivo)
+            if id_texto in embeddings:
+                del embeddings[id_texto]
+                temporal = archivo_embeddings.with_suffix(".tmp")
+                with temporal.open("w", encoding="utf-8") as archivo:
+                    json.dump(embeddings, archivo, ensure_ascii=False, indent=4)
+                temporal.replace(archivo_embeddings)
+    except (OSError, ValueError, TypeError) as error:
+        print("No se pudo eliminar el embedding facial:", error)
 
 
 # ==========================================================

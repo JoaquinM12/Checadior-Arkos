@@ -1,6 +1,6 @@
 import cv2
 import mediapipe as mp
-import numpy as np
+from math import hypot
 
 
 class DetectorParpadeo:
@@ -29,19 +29,15 @@ class DetectorParpadeo:
     def _calcular_ear(self, puntos_ojo, landmarks):
         """Calcula la Relación de Aspecto del Ojo (EAR)"""
         try:
-            p1 = np.array([landmarks[puntos_ojo[1]].x, landmarks[puntos_ojo[1]].y])
-            p5 = np.array([landmarks[puntos_ojo[5]].x, landmarks[puntos_ojo[5]].y])
-            
-            p2 = np.array([landmarks[puntos_ojo[2]].x, landmarks[puntos_ojo[2]].y])
-            p4 = np.array([landmarks[puntos_ojo[4]].x, landmarks[puntos_ojo[4]].y])
-            
-            p0 = np.array([landmarks[puntos_ojo[0]].x, landmarks[puntos_ojo[0]].y])
-            p3 = np.array([landmarks[puntos_ojo[3]].x, landmarks[puntos_ojo[3]].y])
+            p0, p1, p2, p3, p4, p5 = (
+                landmarks[indice]
+                for indice in puntos_ojo
+            )
 
-            # Distancias verticales y horizontal
-            dist_v1 = np.linalg.norm(p1 - p5)
-            dist_v2 = np.linalg.norm(p2 - p4)
-            dist_h = np.linalg.norm(p0 - p3)
+            # Calcular las distancias sin crear arreglos temporales.
+            dist_v1 = hypot(p1.x - p5.x, p1.y - p5.y)
+            dist_v2 = hypot(p2.x - p4.x, p2.y - p4.y)
+            dist_h = hypot(p0.x - p3.x, p0.y - p3.y)
 
             if dist_h == 0:
                 return 0.0

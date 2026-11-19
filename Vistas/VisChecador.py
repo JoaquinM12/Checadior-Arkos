@@ -454,7 +454,7 @@ class VisChecador(QWidget):
         self.lbl_estado.setText("IDENTIDAD NO CONFIRMADA")
 
         self.lbl_maestro.setText(
-            mensaje or "MAESTRO NO RECONOCIDO"
+            mensaje or "Maestro no registrado"
         )
 
         print("[CHECADOR] Maestro no reconocido.")
@@ -805,14 +805,8 @@ class VisChecador(QWidget):
         )
 
         if not resultado.get("reconocido"):
-
-            mensaje = resultado.get(
-                "mensaje",
-                "MAESTRO NO RECONOCIDO"
-            )
-
             self.mostrar_maestro_no_reconocido(
-                mensaje
+                "Maestro no registrado"
             )
 
             return
@@ -822,7 +816,7 @@ class VisChecador(QWidget):
         if not maestro_id:
 
             self.mostrar_maestro_no_reconocido(
-                "MAESTRO NO RECONOCIDO"
+                "Maestro no registrado"
             )
 
             return
@@ -1108,6 +1102,42 @@ class VisChecador(QWidget):
                     "Esperando identificacion..."
                 )
 
+        # Priorizar el rostro más grande, que suele ser quien está más cerca
+        # de la cámara. Los demás se muestran como rostros de segundo plano.
+        if cantidad > 1:
+            rostro_principal = max(
+                rostros,
+                key=lambda rostro: float(rostro[2]) * float(rostro[3])
+            )
+
+            for rostro_secundario in rostros:
+                if rostro_secundario is rostro_principal:
+                    continue
+
+                x_sec, y_sec, ancho_sec, alto_sec = map(
+                    int,
+                    rostro_secundario[:4]
+                )
+                cv2.rectangle(
+                    frame,
+                    (x_sec, y_sec),
+                    (x_sec + ancho_sec, y_sec + alto_sec),
+                    (120, 120, 120),
+                    1
+                )
+                cv2.putText(
+                    frame,
+                    "SEGUNDO PLANO",
+                    (x_sec, max(y_sec - 8, 22)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (120, 120, 120),
+                    1
+                )
+
+            rostros = [rostro_principal]
+            cantidad = 1
+
         # NINGUN ROSTRO
 
         if cantidad == 0:
@@ -1121,47 +1151,6 @@ class VisChecador(QWidget):
             self.lbl_maestro.setText(
                 "Colocate frente a la camara."
             )
-
-        # VARIOS ROSTROS
-
-        elif cantidad > 1:
-
-            self.reiniciar_proceso()
-
-            self.lbl_estado.setText(
-                "VARIAS PERSONAS DETECTADAS"
-            )
-
-            self.lbl_maestro.setText(
-                "Debe permanecer una sola persona."
-            )
-
-            for rostro in rostros:
-
-                x, y, w, h = map(
-                    int,
-                    rostro[:4]
-                )
-
-                cv2.rectangle(
-                    frame,
-                    (x, y),
-                    (x + w, y + h),
-                    (0, 0, 255),
-                    2
-                )
-
-                cv2.putText(
-                    frame,
-                    "DETECCION RECHAZADA",
-                    (x, max(y - 10, 25)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 0, 255),
-                    2
-                )
-
-        # UN SOLO ROSTRO
 
         else:
 

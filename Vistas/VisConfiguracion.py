@@ -1652,7 +1652,7 @@ class VisConfiguracion(QWidget):
 
             tablas = cursor.fetchall()
 
-            self.tabla_bd.setRowCount(0)
+            self.tabla_bd.setRowCount(len(tablas))
 
             for fila, registro in enumerate(tablas):
 
@@ -1663,8 +1663,6 @@ class VisConfiguracion(QWidget):
                 )
 
                 cantidad = cursor.fetchone()[0]
-
-                self.tabla_bd.insertRow(fila)
 
                 self.tabla_bd.setItem(
                     fila,
@@ -2064,21 +2062,25 @@ class VisConfiguracion(QWidget):
             exist_ok=True
         )
 
-        archivos = sorted(
-            self.RUTA_RESPALDOS.glob("*.sql"),
-            key=lambda archivo: archivo.stat().st_mtime,
+        archivos = [
+            (archivo, archivo.stat())
+            for archivo in self.RUTA_RESPALDOS.glob("*.sql")
+        ]
+        archivos.sort(
+            key=lambda elemento: elemento[1].st_mtime,
             reverse=True
         )
 
         self.tabla_respaldos.setRowCount(0)
+        self.tabla_respaldos.setRowCount(len(archivos))
 
-        for fila, archivo in enumerate(archivos):
+        for fila, (archivo, metadatos) in enumerate(archivos):
 
             fecha = datetime.fromtimestamp(
-                archivo.stat().st_mtime
+                metadatos.st_mtime
             ).strftime("%d/%m/%Y %H:%M:%S")
 
-            tamano = archivo.stat().st_size
+            tamano = metadatos.st_size
 
             if tamano >= 1024 * 1024:
 
@@ -2091,8 +2093,6 @@ class VisConfiguracion(QWidget):
             else:
 
                 tamano_texto = f"{tamano} bytes"
-
-            self.tabla_respaldos.insertRow(fila)
 
             item_fecha = QTableWidgetItem(fecha)
             item_archivo = QTableWidgetItem(archivo.name)
